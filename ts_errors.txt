@@ -1,0 +1,13 @@
+app/create-activity.tsx(38,24): error TS2345: Argument of type '"/"' is not assignable to parameter of type 'RelativePathString | ExternalPathString | "/modal" | `/modal?${string}` | `/modal#${string}` | "/../src/store/useStore" | `/../src/store/useStore?${string}` | `/../src/store/useStore#${string}` | "/../src/utils/mathUtils" | ... 76 more ... | { ...; }'.
+app/modal.tsx(11,13): error TS2322: Type '"/"' is not assignable to type 'RelativePathString | ExternalPathString | "/modal" | `/modal?${string}` | `/modal#${string}` | "/../src/store/useStore" | `/../src/store/useStore?${string}` | `/../src/store/useStore#${string}` | "/../src/utils/mathUtils" | ... 76 more ... | { ...; }'.
+components/ActivityCard.tsx(4,25): error TS7031: Binding element 'activity' implicitly has an 'any' type.
+components/ActivityCard.tsx(4,35): error TS7031: Binding element 'onPress' implicitly has an 'any' type.
+components/ActivityCard.tsx(15,25): error TS7006: Parameter 'timestamp' implicitly has an 'any' type.
+components/ActivityListItem.tsx(4,26): error TS2307: Cannot find module '../store/useStore' or its corresponding type declarations.
+components/ActivityListItem.tsx(5,40): error TS2307: Cannot find module '../utils/mathUtils' or its corresponding type declarations.
+components/CurrencyConverter.tsx(4,10): error TS2305: Module '"../src/utils/currencyClient"' has no exported member 'convertCurrency'.
+components/CurrencyConverter.tsx(4,27): error TS2305: Module '"../src/utils/currencyClient"' has no exported member 'fetchCurrencyRates'.
+components/CurrencyConverter.tsx(7,13): error TS2339: Property 'rates' does not exist on type 'AppState'.
+components/CurrencyConverter.tsx(7,20): error TS2339: Property 'setRates' does not exist on type 'AppState'.
+components/ExpenseItem.tsx(4,25): error TS2307: Cannot find module '../store/useStore' or its corresponding type declarations.
+components/FAB.tsx(5,16): error TS7031: Binding element 'onPress' implicitly has an 'any' type.
