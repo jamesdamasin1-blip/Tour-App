@@ -50,22 +50,24 @@ export const GlassTimePicker: React.FC<GlassTimePickerProps> = ({
     const periods = ['AM', 'PM'];
 
     useEffect(() => {
-        if (visible) {
-            setTempHour(value.hour() % 12 || 12);
-            setTempMinute(value.minute());
-            setTempPeriod(value.hour() >= 12 ? 'PM' : 'AM');
+        if (!visible) return;
 
-            // Ensure scroll position is initialized
-            setTimeout(() => {
-                const hour = value.hour() % 12 || 12;
-                const minute = value.minute();
-                const period = value.hour() >= 12 ? 'PM' : 'AM';
+        setTempHour(value.hour() % 12 || 12);
+        setTempMinute(value.minute());
+        setTempPeriod(value.hour() >= 12 ? 'PM' : 'AM');
 
-                hourRef.current?.scrollTo({ x: 0, y: (hour - 1) * ITEM_HEIGHT, animated: false });
-                minuteRef.current?.scrollTo({ x: 0, y: minute * ITEM_HEIGHT, animated: false });
-                periodRef.current?.scrollTo({ x: 0, y: periods.indexOf(period) * ITEM_HEIGHT, animated: false });
-            }, 100);
-        }
+        // Ensure scroll position is initialized
+        const timer = setTimeout(() => {
+            const hour = value.hour() % 12 || 12;
+            const minute = value.minute();
+            const period = value.hour() >= 12 ? 'PM' : 'AM';
+
+            hourRef.current?.scrollTo({ x: 0, y: (hour - 1) * ITEM_HEIGHT, animated: false });
+            minuteRef.current?.scrollTo({ x: 0, y: minute * ITEM_HEIGHT, animated: false });
+            periodRef.current?.scrollTo({ x: 0, y: periods.indexOf(period) * ITEM_HEIGHT, animated: false });
+        }, 100);
+
+        return () => clearTimeout(timer);
     }, [visible, value]);
 
     const handleConfirm = () => {
@@ -85,7 +87,8 @@ export const GlassTimePicker: React.FC<GlassTimePickerProps> = ({
                 <Text
                     style={[
                         styles.itemText,
-                        item === selectedValue && styles.selectedItemText,
+                        { color: isDark ? 'rgba(242, 240, 232, 0.4)' : '#9ca3af' },
+                        item === selectedValue && [styles.selectedItemText, { color: isDark ? '#B2C4AA' : '#5D6D54' }],
                     ]}
                 >
                     {typeof item === 'number' ? item.toString().padStart(2, '0') : item}
@@ -181,14 +184,20 @@ export const GlassTimePicker: React.FC<GlassTimePickerProps> = ({
                         <View style={[
                             styles.highlightBar,
                             {
-                                backgroundColor: isDark ? 'rgba(158, 178, 148, 0.08)' : 'rgba(93, 109, 84, 0.08)',
-                                borderColor: isDark ? 'rgba(158, 178, 148, 0.15)' : 'rgba(93, 109, 84, 0.15)',
+                                backgroundColor: isDark ? 'rgba(158, 178, 148, 0.12)' : 'rgba(93, 109, 84, 0.08)',
+                                borderColor: isDark ? 'rgba(158, 178, 148, 0.25)' : 'rgba(93, 109, 84, 0.15)',
                             }
                         ]} pointerEvents="none" />
                     </View>
 
-                    <TouchableOpacity onPress={handleConfirm} style={styles.confirmButton}>
-                        <Text style={styles.confirmButtonText}>CONFIRM TIME</Text>
+                    <TouchableOpacity 
+                        onPress={handleConfirm} 
+                        style={[
+                            styles.confirmButton,
+                            { backgroundColor: isDark ? '#B2C4AA' : '#5D6D54' }
+                        ]}
+                    >
+                        <Text style={[styles.confirmButtonText, { color: isDark ? '#1a1a1a' : 'white' }]}>CONFIRM TIME</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -269,12 +278,10 @@ const styles = StyleSheet.create({
     selectedItemText: {
         fontSize: 24,
         fontWeight: '900',
-        color: '#5D6D54',
     },
     separator: {
         fontSize: 24,
         fontWeight: '900',
-        color: '#5D6D54',
         marginTop: 18,
         marginHorizontal: 4,
     },
@@ -290,11 +297,10 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(93, 109, 84, 0.15)',
     },
     confirmButton: {
-        backgroundColor: '#5D6D54',
         width: '100%',
         paddingVertical: 16,
         borderRadius: 20,
-        shadowColor: '#5D6D54',
+        shadowColor: '#1a1a1a',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,

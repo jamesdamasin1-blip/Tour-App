@@ -5,15 +5,23 @@ import { useStore } from '../src/store/useStore';
 import { CATEGORY_THEME } from '../src/constants/categories';
 import { ExpenseCategory } from '@/src/types/models';
 import { GlassView } from './GlassView';
+import { BreakdownMode } from '@/src/hooks/useFilteredBreakdown';
+import { SpendingTotals } from '@/src/hooks/useSpendingTotals';
 
 interface DailyData {
-    date: string; // ISO date string
-    label: string; // Full date label
-    shortLabel: string; // Short date label e.g. "04/16/26"
+    date: string;
+    label: string;
+    shortLabel: string;
     spent: number;
     budget: number;
     categories: Record<string, number>;
 }
+
+const BREAKDOWN_TABS: { key: BreakdownMode; label: string }[] = [
+    { key: 'all',         label: 'ALL' },
+    { key: 'planned',     label: 'PLANNED' },
+    { key: 'spontaneous', label: 'SPONT.' },
+];
 
 interface DailyBarChartProps {
     data: DailyData[];
@@ -22,13 +30,18 @@ interface DailyBarChartProps {
     totalBudget: number;
     selectedDay: string | null;
     onSelectDay: (date: string | null) => void;
+    breakdownMode?: BreakdownMode;
+    onBreakdownChange?: (mode: BreakdownMode) => void;
+    spendingTotals?: SpendingTotals;
 }
 
-export const DailyBarChart = React.memo(({ data, averageSpent, averageBudget, totalBudget, selectedDay, onSelectDay }: DailyBarChartProps) => {
+export const DailyBarChart = React.memo(({
+    data, averageSpent, averageBudget, totalBudget, selectedDay, onSelectDay,
+    breakdownMode, onBreakdownChange, spendingTotals,
+}: DailyBarChartProps) => {
     const { theme } = useStore();
     const isDark = theme === 'dark';
-    
-    // Find the max value to scale the bars height dynamically
+
     const maxVal = useMemo(() => {
         const allValues = data.flatMap(d => [d.spent, d.budget]);
         return Math.max(...allValues, 100);
@@ -44,29 +57,58 @@ export const DailyBarChart = React.memo(({ data, averageSpent, averageBudget, to
             borderWidth={1}
         >
             <View className="p-5 w-full">
-                <View className="flex-row justify-between items-end mb-6">
-                    <View className="flex-1">
-                        <Text className={`text-[10px] font-black uppercase tracking-widest mb-1 ${isDark ? 'text-[#9EB294]/60' : 'text-gray-400'}`}>Average Daily Spending</Text>
-                        <Text className={`text-2xl font-black ${isDark ? 'text-[#F2F0E8]' : 'text-[#5D6D54]'}`} numberOfLines={1}>
-                            ₱{averageSpent.toLocaleString()}
-                        </Text>
-                    </View>
-                    <View className="flex-1 items-end">
-                        <Text className={`text-[10px] font-black uppercase tracking-widest mb-1 ${isDark ? 'text-[#9EB294]/60' : 'text-gray-400'}`}>Average Allotted Budget</Text>
-                        <Text className={`text-2xl font-black ${isDark ? 'text-[#B2C4AA]/60' : 'text-[#5D6D54]/60'}`} numberOfLines={1}>
+                <View className="mb-4">
+                    <Text className={`text-[9px] font-black uppercase tracking-widest mb-1 ${isDark ? 'text-[#9EB294]/60' : 'text-gray-400'}`}>Average Daily Spending</Text>
+                    <Text className={`text-2xl font-black ${isDark ? 'text-[#F2F0E8]' : 'text-[#5D6D54]'}`} numberOfLines={1}>
+                        ₱{averageSpent.toLocaleString()}
+                    </Text>
+                    <View className="flex-row items-baseline mt-2">
+                        <Text className={`text-[9px] font-black uppercase tracking-widest ${isDark ? 'text-[#9EB294]/60' : 'text-gray-400'}`}>Avg. Allotted </Text>
+                        <Text className={`text-sm font-black ${isDark ? 'text-[#B2C4AA]/60' : 'text-[#5D6D54]/60'}`} numberOfLines={1}>
                             ₱{averageBudget.toLocaleString()}
                         </Text>
                     </View>
                 </View>
 
+                {/* Breakdown toggle — only rendered when props provided */}
+                {breakdownMode !== undefined && onBreakdownChange && (
+                    <View style={{
+                        flexDirection: 'row', padding: 3, borderRadius: 12, marginBottom: 16,
+                        backgroundColor: isDark ? 'rgba(30, 34, 28, 0.6)' : 'rgba(93, 109, 84, 0.08)',
+                        borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.1)' : 'rgba(93,109,84,0.12)',
+                    }}>
+                        {BREAKDOWN_TABS.map(({ key, label }) => (
+                            <TouchableOpacity
+                                key={key}
+                                onPress={() => onBreakdownChange(key)}
+                                style={{
+                                    flex: 1, paddingVertical: 7, borderRadius: 9, alignItems: 'center',
+                                    backgroundColor: breakdownMode === key
+                                        ? (isDark ? '#B2C4AA' : '#5D6D54')
+                                        : 'transparent',
+                                }}
+                            >
+                                <Text style={{
+                                    fontSize: 9, fontWeight: '900', letterSpacing: 1, textTransform: 'uppercase',
+                                    color: breakdownMode === key
+                                        ? (isDark ? '#1A1C18' : 'white')
+                                        : (isDark ? '#9EB294' : '#5D6D54'),
+                                }}>
+                                    {label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
+
                 {/* Scrollable Bar Graph Container */}
                 <ScrollView
                     horizontal
-                    showsHorizontalScrollIndicator={false}
+                    showsHorizontalScrollIndicator
                     contentContainerStyle={{
-                        flexGrow: 1,
                         paddingBottom: 10,
-                        paddingRight: 20
+                        paddingRight: 48,
+                        paddingLeft: 4,
                     }}
                 >
                     <View className="flex-row items-end h-[250px]">

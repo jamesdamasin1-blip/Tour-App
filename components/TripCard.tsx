@@ -13,6 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { getFlagUrl } from '../src/data/countryMapping';
 import { useStore } from '../src/store/useStore';
+import { Calculations as MathUtils } from '../src/utils/mathUtils';
 import { GlassView } from './GlassView';
 import { ProgressBar } from './ProgressBar';
 
@@ -24,6 +25,9 @@ interface TripCardProps {
     endDate: number;
     budget: number;
     spent: number;
+    balance?: string;
+    balanceDetail?: string;
+    tripCurrency?: string;
     isCompleted?: boolean;
     onPress: () => void;
     onLongPress?: () => void;
@@ -35,7 +39,7 @@ const MAX_SWIPE = 110;
 const ACTION_TRIGGER = 80;
 const SPRING_CONFIG = { damping: 20, stiffness: 200, mass: 0.8 };
 
-export const TripCard = React.memo(({ id, title, countries = [], startDate, endDate, budget, spent, isCompleted = false, onPress, onLongPress, onDelete, onEdit }: TripCardProps) => {
+export const TripCard = React.memo(({ id, title, countries = [], startDate, endDate, budget, spent, balance, balanceDetail, tripCurrency = 'PHP', isCompleted = false, onPress, onLongPress, onDelete, onEdit }: TripCardProps) => {
     const { theme } = useStore();
     const isDark = theme === 'dark';
 
@@ -188,20 +192,41 @@ export const TripCard = React.memo(({ id, title, countries = [], startDate, endD
 
                             {/* Content */}
                             <View style={styles.cardPadding}>
-                                <Text style={[styles.title, isDark && { color: '#F2F0E8' }]} numberOfLines={1}>{title}</Text>
+                                <Text 
+                                    style={[styles.title, isDark && { color: '#F2F0E8' }]} 
+                                    numberOfLines={2}
+                                    adjustsFontSizeToFit
+                                    minimumFontScale={0.8}
+                                >
+                                    {title}
+                                </Text>
+                                
+                                {balance && (
+                                    <View style={[styles.balanceBadge, { backgroundColor: isDark ? 'rgba(158, 178, 148, 0.08)' : 'rgba(93, 109, 84, 0.04)' }]}>
+                                        <Text style={[styles.balanceAmount, { color: isDark ? '#B2C4AA' : '#5D6D54' }]}>
+                                        {balance}
+                                    </Text>
+                                        {balanceDetail && (
+                                            <Text style={styles.balanceDetail}>
+                                                {balanceDetail}
+                                            </Text>
+                                        )}
+                                    </View>
+                                )}
+
                                 <View style={styles.dateRow}>
                                     <Feather name="calendar" size={10} color={isDark ? '#9EB294' : '#6b7280'} style={{ marginRight: 4, opacity: 0.7 }} />
                                     <Text style={[styles.dateText, isDark && { color: '#9EB294' }]}>{dateRange}</Text>
                                 </View>
-
+ 
                                 <ProgressBar
                                     progress={percentage}
                                     gradientColors={['#B5C0A2', '#5D6D54']}
                                     trackColor={isDark ? "rgba(158, 178, 148, 0.15)" : "rgba(93, 109, 84, 0.12)"}
-                                    height={28}
+                                    height={32}
                                     fontSize={13}
                                     showPercentage={false}
-                                    floatingLabel={`₱${spent.toLocaleString()} / ₱${budget.toLocaleString()} (${percentage}%)`}
+                                    floatingLabel={`${MathUtils.formatCurrency(spent, tripCurrency)} / ${MathUtils.formatCurrency(budget, tripCurrency)} (${percentage}%)`}
                                 />
                             </View>
                         </GlassView>
@@ -236,8 +261,8 @@ const styles = StyleSheet.create({
     edgeIconRight: { right: 0 },
     edgeIconLeft: { left: 0 },
     cardPadding: {
-        paddingHorizontal: 24,
-        paddingVertical: 20,
+        paddingHorizontal: 20,
+        paddingVertical: 18,
         zIndex: 10,
     },
     title: {
@@ -248,6 +273,29 @@ const styles = StyleSheet.create({
         lineHeight: 22,
         textAlign: 'left',
         marginBottom: 4,
+    },
+    balanceBadge: {
+        alignSelf: 'flex-start',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(158, 178, 148, 0.2)',
+        marginBottom: 12,
+    },
+    balanceAmount: {
+        fontSize: 17,
+        fontWeight: '900',
+        textTransform: 'uppercase',
+    },
+    balanceDetail: {
+        fontSize: 9,
+        fontWeight: '800',
+        color: '#9EB294',
+        textTransform: 'uppercase',
+        marginTop: -1,
+        letterSpacing: 0.5,
+        opacity: 0.8,
     },
     dateRow: {
         flexDirection: 'row',

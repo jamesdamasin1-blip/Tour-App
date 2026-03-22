@@ -24,7 +24,7 @@ export function ActivitySummaryModal({
     onEdit,
     onToggleComplete
 }: ActivitySummaryModalProps) {
-    const { theme } = useStore();
+    const { theme, trips } = useStore();
     const isDark = theme === 'dark';
     const slideAnim = React.useRef(new Animated.Value(0)).current;
     const [page, setPage] = React.useState(0);
@@ -40,9 +40,24 @@ export function ActivitySummaryModal({
         }).start();
     };
 
-    const totalSpent = Calculations.calculateTotalExpenses(activity.expenses);
-    const isOverBudget = totalSpent > activity.allocatedBudget;
-    const variance = Math.abs(activity.allocatedBudget - totalSpent);
+    // Normalize to home currency — same logic as ActivityListItem
+    const trip = trips.find(t => t.id === activity.tripId);
+    const homeCurrency = trip?.homeCurrency || 'PHP';
+    const wallet = trip?.wallets?.find(w => w.id === activity.walletId);
+    const walletRate = wallet?.baselineExchangeRate || 1;
+
+    const members = trip?.members || [];
+    const createdByMember = activity.createdBy ? members.find(m => m.id === activity.createdBy) : null;
+    const modifiedByMember = activity.lastModifiedBy ? members.find(m => m.id === activity.lastModifiedBy) : null;
+    const showModifiedBy = modifiedByMember && modifiedByMember.id !== createdByMember?.id;
+
+    const totalSpentHome = (activity.expenses || []).reduce((sum, e) => sum + (e.convertedAmountHome || 0), 0);
+    const allocatedBudgetHome = (activity.budgetCurrency === homeCurrency)
+        ? activity.allocatedBudget
+        : activity.allocatedBudget * walletRate;
+
+    const isOverBudget = totalSpentHome > allocatedBudgetHome;
+    const variance = Math.abs(allocatedBudgetHome - totalSpentHome);
     const hasExpenses = activity.expenses && activity.expenses.length > 0;
 
     return (
@@ -52,8 +67,8 @@ export function ActivitySummaryModal({
                 activeOpacity={1} 
                 onPress={onClose}
             >
-                <BlurView intensity={30} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
+                <BlurView intensity={40} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
                 
                 <View style={{ width: '100%', maxWidth: 440, paddingHorizontal: 16 }}>
                     <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
@@ -79,6 +94,16 @@ export function ActivitySummaryModal({
                                         <Text className={`text-[13px] font-black uppercase tracking-widest ${isDark ? 'text-[#B2C4AA]' : 'text-[#9ca3af]'}`}>
                                             DATE AND TIME: <Text style={{ color: isDark ? '#F2F0E8' : '#374151' }}>{new Date(activity.date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} • {new Date(activity.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
                                         </Text>
+                                        {createdByMember && (
+                                            <Text className={`text-[13px] font-black uppercase tracking-widest ${isDark ? 'text-[#B2C4AA]' : 'text-[#9ca3af]'}`}>
+                                                CREATED BY: <Text style={{ color: createdByMember.color }}>{createdByMember.name}</Text>
+                                            </Text>
+                                        )}
+                                        {showModifiedBy && (
+                                            <Text className={`text-[13px] font-black uppercase tracking-widest ${isDark ? 'text-[#B2C4AA]' : 'text-[#9ca3af]'}`}>
+                                                MODIFIED BY: <Text style={{ color: modifiedByMember!.color }}>{modifiedByMember!.name}</Text>
+                                            </Text>
+                                        )}
                                     </View>
                                 </View>
                                 <View className="mt-2 space-y-4">
@@ -87,7 +112,7 @@ export function ActivitySummaryModal({
                                             className="text-[14px] font-black uppercase tracking-widest"
                                             style={{ color: isOverBudget ? '#FF3B30' : (isDark ? '#F2F0E8' : '#5D6D54') }}
                                         >
-                                            {isOverBudget ? `YOU EXCEEDED BY ₱${variance.toLocaleString()} FOR THIS TRIP.` : `YOU'VE SAVED ₱${variance.toLocaleString()} FOR THIS TRIP.`}
+                                            {isOverBudget ? `YOU EXCEEDED BY ${Calculations.formatCurrency(variance, homeCurrency)} FOR THIS TRIP.` : `YOU'VE SAVED ${Calculations.formatCurrency(variance, homeCurrency)} FOR THIS TRIP.`}
                                         </Text>
                                     </View>
 

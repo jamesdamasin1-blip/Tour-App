@@ -6,11 +6,6 @@ export const CurrencyUtils = {
     parseInput: Calculations.parseCurrencyInput,
     formatInput: Calculations.formatCurrencyInput,
 
-    convert: (amount: number, fromRate: number | null, toRate: number | null = 1) => {
-        if (!fromRate) return amount;
-        return amount * fromRate;
-    },
-
     fetchRates: async (currentCache: any, cacheAction: any) => {
         return await fetchAndCacheRates(currentCache, cacheAction);
     }

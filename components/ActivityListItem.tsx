@@ -39,21 +39,48 @@ export const ActivityListItem = React.memo(({
     onEdit,
     onToggleComplete,
 }: ActivityListItemProps) => {
-    const { theme } = useStore();
+    const { theme, trips } = useStore();
     const isDark = theme === 'dark';
 
     const [isSummaryVisible, setIsSummaryVisible] = useState(false);
 
-    const totalSpent = useMemo(() =>
-        (activity.expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0),
-        [activity.expenses]
-    );
-    const allocatedBudget = activity.allocatedBudget || 0;
-    const spendPercentage = allocatedBudget > 0
-        ? Math.round((totalSpent / allocatedBudget) * 100)
+    // Resolve home currency from the trip so we can normalize expenses correctly
+    const trip = useMemo(() => trips.find(t => t.id === activity.tripId), [trips, activity.tripId]);
+    const homeCurrency = trip?.homeCurrency || trip?.currency || 'PHP';
+
+    // Member color indicator — only show when trip has members
+    const authorMember = useMemo(() => {
+        const members = trip?.members;
+        if (!members || members.length === 0) return null;
+        const authorId = activity.lastModifiedBy || activity.createdBy;
+        if (!authorId) return null;
+        return members.find(m => m.id === authorId) || null;
+    }, [trip?.members, activity.lastModifiedBy, activity.createdBy]);
+    const memberColor = authorMember?.color || null;
+
+    // Find the specific wallet linked to this activity to get its baseline exchange rate
+    const wallet = useMemo(() => trip?.wallets?.find(w => w.id === activity.walletId), [trip, activity.walletId]);
+    const walletRate = wallet?.baselineExchangeRate || 1;
+
+    // Normalize everything to Home Currency for the progress bar
+    const totalSpentHome = useMemo(() => {
+        return (activity.expenses || []).reduce((sum, e) => sum + (e.convertedAmountHome || 0), 0);
+    }, [activity.expenses]);
+
+    // Only convert if budgetCurrency is the wallet/local currency — not if already in home currency
+    const allocatedBudgetHome = useMemo(() => {
+        const budget = activity.allocatedBudget || 0;
+        const budgetCurrency = activity.budgetCurrency || '';
+        if (budgetCurrency === homeCurrency) return budget;
+        return budget * walletRate;
+    }, [activity.allocatedBudget, activity.budgetCurrency, homeCurrency, walletRate]);
+    
+    const spendPercentage = allocatedBudgetHome > 0
+        ? Math.round((totalSpentHome / allocatedBudgetHome) * 100)
         : 0;
-    const variance = Math.abs(allocatedBudget - totalSpent);
-    const isOverBudget = totalSpent > allocatedBudget;
+
+    const varianceHome = Math.abs(allocatedBudgetHome - totalSpentHome);
+    const isOverBudget = totalSpentHome > allocatedBudgetHome;
 
     const dateString = new Date(activity.date).toLocaleDateString([], { month: 'short', day: 'numeric' });
     const timeString = activity.time
@@ -152,6 +179,15 @@ export const ActivityListItem = React.memo(({
                                 : (isDark ? "rgba(60, 68, 56, 0.8)" : "rgba(255, 255, 255, 0.75)")
                             }
                         >
+                            {/* Member color indicator — left border strip */}
+                            {memberColor && (
+                                <View style={{
+                                    position: 'absolute', left: 0, top: 12, bottom: 12,
+                                    width: 3, borderRadius: 2, backgroundColor: memberColor,
+                                    opacity: 0.7, zIndex: 20,
+                                }} />
+                            )}
+
                             {/* Delete gradient tint */}
                             <Animated.View style={[StyleSheet.absoluteFillObject, styles.overlayRadius, deleteOverlayStyle]} pointerEvents="none">
                                 <LinearGradient
@@ -184,11 +220,13 @@ export const ActivityListItem = React.memo(({
                             {activity.isCompleted && (
                                 <View style={styles.backgroundIconContainer} pointerEvents="none">
                                     <Feather
-                                        name={isOverBudget ? "alert-circle" : "check-circle"}
+                                        name={activity.isSpontaneous ? "zap" : (isOverBudget ? "alert-circle" : "check-circle")}
                                         size={160}
-                                        color={isOverBudget 
-                                            ? (isDark ? "rgba(239, 68, 68, 0.1)" : "rgba(239, 68, 68, 0.15)")
-                                            : (isDark ? "rgba(158, 178, 148, 0.08)" : "rgba(93, 109, 84, 0.15)")
+                                        color={activity.isSpontaneous
+                                            ? (isDark ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.12)")
+                                            : isOverBudget
+                                                ? (isDark ? "rgba(239, 68, 68, 0.1)" : "rgba(239, 68, 68, 0.15)")
+                                                : (isDark ? "rgba(158, 178, 148, 0.08)" : "rgba(93, 109, 84, 0.15)")
                                         }
                                     />
                                 </View>
@@ -202,36 +240,64 @@ export const ActivityListItem = React.memo(({
                                             <Feather name={getCategoryTheme(activity.category).icon as any} size={22} color={getCategoryTheme(activity.category).color} />
                                         </View>
                                         <View style={{ flex: 1 }}>
-                                            <Text style={[styles.title, isDark && { color: '#F2F0E8' }]} numberOfLines={1}>{activity.title.toUpperCase()}</Text>
-                                            <Text style={[styles.subtitle, isDark && { color: '#9EB294' }]}>{dateString} • {timeString}</Text>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                <Text style={[styles.title, isDark && { color: '#F2F0E8' }]} numberOfLines={1}>
+                                                    {activity.title.toUpperCase()}
+                                                </Text>
+                                            </View>
+                                            <Text style={[styles.subtitle, isDark && { color: '#9EB294' }]}>
+                                                {dateString} • {timeString}
+                                                {authorMember ? <Text style={{ color: authorMember.color, fontWeight: '900' }}> • {authorMember.name.charAt(0).toUpperCase()}</Text> : null}
+                                            </Text>
                                         </View>
                                     </View>
-                                    <View style={styles.headerRight}>
-                                        <Text style={[styles.statusLabel, { color: isOverBudget ? '#ef4444' : (isDark ? '#9EB294' : '#5D6D54') }]}>
-                                            {isOverBudget ? 'EXCEEDED BY' : 'SAVED'}
-                                        </Text>
-                                        <Text style={[styles.statusAmount, { color: isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54') }]}>
-                                            ₱{variance.toLocaleString()}
-                                        </Text>
-                                    </View>
+                                    {activity.expenses && activity.expenses.length > 0 ? (
+                                        <View style={styles.headerRight}>
+                                            <Text style={[styles.statusLabel, { color: isOverBudget ? '#ef4444' : (isDark ? '#9EB294' : '#5D6D54') }]}>
+                                                {activity.isSpontaneous ? 'COST' : (isOverBudget ? 'EXCEEDED BY' : (varianceHome === 0 ? 'ON POINT' : 'SAVED'))}
+                                            </Text>
+                                            <Text style={[styles.statusAmount, { color: isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54') }]}>
+                                                {activity.isSpontaneous
+                                                    ? MathUtils.formatCurrency(totalSpentHome, homeCurrency)
+                                                    : MathUtils.formatCurrency(varianceHome, homeCurrency)
+                                                }
+                                            </Text>
+                                        </View>
+                                    ) : allocatedBudgetHome > 0 && !activity.isSpontaneous ? (
+                                        <View style={styles.headerRight}>
+                                            <Text style={[styles.statusLabel, { color: isDark ? '#9EB294' : '#5D6D54' }]}>
+                                                BUDGET
+                                            </Text>
+                                            <Text style={[styles.statusAmount, { color: isDark ? '#B2C4AA' : '#5D6D54' }]}>
+                                                {MathUtils.formatCurrency(allocatedBudgetHome, homeCurrency)}
+                                            </Text>
+                                        </View>
+                                    ) : null}
                                 </View>
 
-                                <View style={{ 
-                                    backgroundColor: isOverBudget 
-                                        ? (isDark ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2') 
-                                        : (isDark ? 'rgba(158, 178, 148, 0.1)' : '#f1f5f1'), 
-                                    borderRadius: 12, 
-                                    marginTop: 4 
-                                }}>
-                                    <ProgressBar
-                                        progress={Math.min(spendPercentage, 100)}
-                                        color={isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54')}
-                                        trackColor="transparent"
-                                        height={24}
-                                        fontSize={11}
-                                        floatingLabel={`₱${totalSpent.toLocaleString()} / ₱${allocatedBudget.toLocaleString()} (${spendPercentage}%)`}
-                                    />
-                                </View>
+                                {/* Cost bar — shown for both planned and spontaneous */}
+                                {activity.expenses && activity.expenses.length > 0 && (
+                                    <View style={{
+                                        backgroundColor: isOverBudget
+                                            ? (isDark ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2')
+                                            : (isDark ? 'rgba(158, 178, 148, 0.1)' : '#f1f5f1'),
+                                        borderRadius: 12,
+                                        marginTop: 4
+                                    }}>
+                                        <ProgressBar
+                                            progress={activity.isSpontaneous ? 100 : Math.min(spendPercentage, 100)}
+                                            color={isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54')}
+                                            trackColor="transparent"
+                                            height={24}
+                                            fontSize={11}
+                                            floatingLabel={
+                                                activity.isSpontaneous
+                                                    ? MathUtils.formatCurrency(totalSpentHome, homeCurrency)
+                                                    : `${MathUtils.formatCurrency(totalSpentHome, homeCurrency)} / ${MathUtils.formatCurrency(allocatedBudgetHome, homeCurrency)} (${spendPercentage}%)`
+                                            }
+                                        />
+                                    </View>
+                                )}
                             </View>
                         </GlassView>
                     </TouchableOpacity>

@@ -15,8 +15,13 @@ export const MeshBackground: React.FC<{ children?: React.ReactNode; style?: any 
 
     return (
         <View style={[{ flex: 1, backgroundColor: isDark ? '#1A1C18' : '#F2F0E8' }, style]}>
-            {/* Background tints in an absolute layer */}
-            <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {/* Premium Mesh Background Layers - Hardware Accelerated */}
+            <View 
+                style={StyleSheet.absoluteFill} 
+                pointerEvents="none"
+                renderToHardwareTextureAndroid={true}
+                shouldRasterizeIOS={true}
+            >
                 {/* Top-left blob: soft sage blue-green */}
                 <LinearGradient
                     colors={[isDark ? 'rgba(93, 109, 84, 0.40)' : 'rgba(178, 196, 170, 0.60)', 'transparent']}

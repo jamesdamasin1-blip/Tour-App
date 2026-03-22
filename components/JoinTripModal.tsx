@@ -53,7 +53,7 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({
                     onPress={handleClose}
                 >
                     <BlurView intensity={40} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
-                    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
+                    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
                 </TouchableOpacity>
 
                 <View style={styles.modalContent}>

@@ -1,0 +1,3 @@
+-- accept_trip_invite RPC
+-- SUPERSEDED by 003_schema_alignment.sql which includes the latest version.
+-- Kept for history only. Run 003 instead.

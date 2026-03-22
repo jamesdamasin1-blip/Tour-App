@@ -6,7 +6,7 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View, Share, Alert } from 'r
 import { TripPlan } from '@/src/types/models';
 import { useStore } from '@/src/store/useStore';
 import { GlassView } from './GlassView';
-import { encode } from 'base-64';
+import { base64Encode } from '@/src/utils/base64';
 import QRCode from 'react-native-qrcode-svg';
 
 interface TripShareModalProps {
@@ -19,6 +19,7 @@ export const TripShareModal = ({ isVisible, trip, onClose }: TripShareModalProps
     const { theme, toggleTripCompletion, activities } = useStore();
     const isDark = theme === 'dark';
     const [view, setView] = React.useState<'OPTIONS' | 'SHARE'>('OPTIONS');
+    const [shareRole, setShareRole] = React.useState<'admin' | 'viewer'>('viewer');
 
     if (!trip) return null;
 
@@ -33,17 +34,24 @@ export const TripShareModal = ({ isVisible, trip, onClose }: TripShareModalProps
         const tripActivities = activities.filter(a => a.tripId === trip.id);
         const shareData = {
             ...trip,
+            role: shareRole,
             activities: tripActivities,
             sharedAt: Date.now(),
-            source: 'OrbitalGalileo'
+            source: 'OrbitalGalileo',
+            isCloudSynced: true // Mark as synced for the joiner
         };
-        return encode(JSON.stringify(shareData));
+        return base64Encode(JSON.stringify(shareData));
+    };
+
+    const handlePrepareShare = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setView('SHARE');
     };
 
     const handleShareTrip = async () => {
         try {
             const encodedData = getEncodedData();
-            const shareMessage = `Hey! Join my trip "${trip.title}" on the Tour Budget App.\n\nCopy this code and select the "+" icon in the My Trips screen:\n\n${encodedData}`;
+            const shareMessage = `Hey! Join my trip "${trip.title}" on Aliqual.\n\nCopy this code and select the "+" icon in the My Trips screen:\n\n${encodedData}`;
             
             await Share.share({
                 message: shareMessage,
@@ -68,8 +76,8 @@ export const TripShareModal = ({ isVisible, trip, onClose }: TripShareModalProps
                 activeOpacity={1} 
                 onPress={onClose}
             >
-                <BlurView intensity={50} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
+                <BlurView intensity={40} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
                 
                 <TouchableOpacity activeOpacity={1} style={styles.modalContent}>
                     <GlassView
@@ -86,18 +94,17 @@ export const TripShareModal = ({ isVisible, trip, onClose }: TripShareModalProps
                             <View style={styles.optionsContainer}>
                                 {view === 'OPTIONS' ? (
                                     <>
-                                        <TouchableOpacity 
+                                        <TouchableOpacity
                                             style={[styles.optionButton, isDark ? styles.optionDark : styles.optionLight]}
-                                            onPress={() => {
-                                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                                setView('SHARE');
-                                            }}
+                                            onPress={handlePrepareShare}
                                         >
                                             <View style={styles.optionIcon}>
                                                 <Feather name="users" size={20} color={isDark ? "#B2C4AA" : "#5D6D54"} />
                                             </View>
                                             <View style={styles.optionTextContainer}>
-                                                <Text style={[styles.optionTitle, isDark && { color: '#F2F0E8' }]}>Add Person</Text>
+                                                <Text style={[styles.optionTitle, isDark && { color: '#F2F0E8' }]}>
+                                                    Add Person
+                                                </Text>
                                                 <Text style={styles.optionDesc}>Show QR code or share trip link</Text>
                                             </View>
                                             <Feather name="chevron-right" size={18} color={isDark ? "rgba(158,178,148,0.4)" : "#CBD5E1"} />
@@ -127,6 +134,29 @@ export const TripShareModal = ({ isVisible, trip, onClose }: TripShareModalProps
                                     </>
                                 ) : (
                                     <View style={styles.qrContainer}>
+                                        <View style={styles.roleToggleContainer}>
+                                            <TouchableOpacity 
+                                                onPress={() => {
+                                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                                    setShareRole('viewer');
+                                                }}
+                                                style={[styles.roleBtn, shareRole === 'viewer' && (isDark ? styles.roleBtnActiveDark : styles.roleBtnActiveLight)]}
+                                            >
+                                                <Feather name="eye" size={16} color={shareRole === 'viewer' ? "#FFF" : (isDark ? "#9EB294" : "#64748b")} />
+                                                <Text style={[styles.roleBtnText, shareRole === 'viewer' && styles.roleBtnTextActive, isDark && { color: shareRole === 'viewer' ? '#FFF' : '#9EB294' }]}>VIEW ONLY</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity 
+                                                onPress={() => {
+                                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                                    setShareRole('admin');
+                                                }}
+                                                style={[styles.roleBtn, shareRole === 'admin' && (isDark ? styles.roleBtnActiveDark : styles.roleBtnActiveLight)]}
+                                            >
+                                                <Feather name="edit-2" size={14} color={shareRole === 'admin' ? "#FFF" : (isDark ? "#9EB294" : "#64748b")} />
+                                                <Text style={[styles.roleBtnText, shareRole === 'admin' && styles.roleBtnTextActive, isDark && { color: shareRole === 'admin' ? '#FFF' : '#9EB294' }]}>CAN EDIT</Text>
+                                            </TouchableOpacity>
+                                        </View>
+
                                         <Text style={[styles.qrHint, isDark && { color: '#9EB294' }]}>Ask them to scan this QR code from their "My Trips" screen</Text>
                                         <View style={styles.qrWrapper}>
                                             <QRCode
@@ -308,5 +338,37 @@ const styles = StyleSheet.create({
         color: '#475569',
         textTransform: 'uppercase',
         letterSpacing: 1,
+    },
+    roleToggleContainer: {
+        flexDirection: 'row',
+        backgroundColor: 'rgba(0,0,0,0.05)',
+        borderRadius: 16,
+        padding: 4,
+        marginBottom: 24,
+        width: '100%',
+    },
+    roleBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        borderRadius: 12,
+        gap: 8,
+    },
+    roleBtnActiveLight: {
+        backgroundColor: '#5D6D54',
+    },
+    roleBtnActiveDark: {
+        backgroundColor: '#5D6D54',
+    },
+    roleBtnText: {
+        fontSize: 10,
+        fontWeight: '900',
+        color: '#64748b',
+        letterSpacing: 1,
+    },
+    roleBtnTextActive: {
+        color: '#FFF',
     },
 });

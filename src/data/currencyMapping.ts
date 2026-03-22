@@ -44,5 +44,5 @@ export const ALL_CURRENCIES = Array.from(new Set([
 ])).sort();
 
 export const getCurrencyForCountry = (country: string): string => {
-    return COUNTRY_CURRENCY_MAPPING[country] || 'PHP';
+    return COUNTRY_CURRENCY_MAPPING[country] || 'USD';
 };

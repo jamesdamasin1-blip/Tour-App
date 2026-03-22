@@ -1,6 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
-const SUPABASE_URL = 'https://smvexxzndteksfbzlelr.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_o6kYgQy-TrUeoZBa1uU_iw_Nzlffvsn';
+const SUPABASE_URL = Constants.expoConfig?.extra?.supabaseUrl;
+const SUPABASE_ANON_KEY = Constants.expoConfig?.extra?.supabaseAnonKey;
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+if (!SUPABASE_URL) {
+    throw new Error('Missing EXPO_PUBLIC_SUPABASE_URL — check .env and app.config.js');
+}
+if (!SUPABASE_ANON_KEY) {
+    throw new Error('Missing EXPO_PUBLIC_SUPABASE_ANON_KEY — check .env and app.config.js');
+}
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+        storage: AsyncStorage,
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: false,
+    },
+});

@@ -52,7 +52,7 @@ export const GlassView: React.FC<GlassViewProps> = ({
     borderRadius = 28,
     borderColor = 'rgba(255, 255, 255, 0.4)',
     borderWidth = 1,
-    backgroundColor = 'rgba(255, 255, 255, 0.85)',
+    backgroundColor,
     hasShadow = false,
     shadowColor = '#000',
     shadowOffset = { width: 0, height: 8 },
@@ -144,11 +144,14 @@ export const GlassView: React.FC<GlassViewProps> = ({
                 ]}>
                     <View style={[StyleSheet.absoluteFill, { backgroundColor: resolvedBg }]} />
                     
-                    {/* Simplified Android Deck - No decorative lines to avoid rendering artifacts */}
+                    {/* Inner content container - Explicitly DO NOT apply shadow/elevation here */}
                     <View style={[
                         styles.contentContainer, 
-                        contentStyle, 
-                        otherStyles,
+                        contentStyle,
+                        (() => {
+                            const { elevation: _, ...safeStyles } = otherStyles;
+                            return safeStyles;
+                        })(),
                         hasFlexOrHeight && { flex: 1 }
                     ]}>
                         {children}

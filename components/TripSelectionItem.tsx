@@ -56,18 +56,18 @@ export const TripSelectionItem = ({ title, startDate, endDate, countries, onSele
 
                 <View className="px-5 py-5 flex-row items-center justify-between">
                     <View className="flex-1 mr-4">
-                        <Text className={`text-lg font-black uppercase leading-tight mb-1 ${isDark ? 'text-[#F2F0E8]' : 'text-gray-900'}`}>
+                        <Text className={`text-xl font-black uppercase leading-tight mb-1 ${isDark ? 'text-[#F2F0E8]' : 'text-gray-900'}`}>
                             {title}
                         </Text>
                         <View className="flex-row items-center">
-                            <Feather name="calendar" size={12} color={isDark ? "#B2C4AA" : "#5D6D54"} style={{ marginRight: 4 }} />
-                            <Text className={`text-xs font-bold uppercase tracking-tighter ${isDark ? 'text-[#B2C4AA]' : 'text-[#5D6D54]'}`}>
+                            <Feather name="calendar" size={14} color={isDark ? "#B2C4AA" : "#5D6D54"} style={{ marginRight: 4 }} />
+                            <Text className={`text-sm font-bold uppercase tracking-tighter ${isDark ? 'text-[#B2C4AA]' : 'text-[#5D6D54]'}`}>
                                 {dateRange}
                             </Text>
                         </View>
                     </View>
 
-                    <Feather name="chevron-right" size={24} color={isDark ? "#B2C4AA" : "#5D6D54"} />
+                    <Feather name="chevron-right" size={28} color={isDark ? "#B2C4AA" : "#5D6D54"} />
                 </View>
             </GlassView>
         </TouchableOpacity>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, Modal, Platform } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Feather } from '@expo/vector-icons';
@@ -14,18 +14,20 @@ interface QRScannerModalProps {
 export const QRScannerModal = ({ isVisible, onClose, onScan }: QRScannerModalProps) => {
     const [permission, requestPermission] = useCameraPermissions();
     const [scanned, setScanned] = useState(false);
+    const scanTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
     useEffect(() => {
         if (isVisible && !permission?.granted) {
             requestPermission();
         }
+        return () => { if (scanTimerRef.current) clearTimeout(scanTimerRef.current); };
     }, [isVisible, permission]);
 
     const handleBarCodeScanned = ({ data }: { data: string }) => {
         if (scanned) return;
         setScanned(true);
         onScan(data);
-        setTimeout(() => setScanned(false), 2000); // Prevent rapid multiple scans
+        scanTimerRef.current = setTimeout(() => setScanned(false), 2000);
     };
 
     if (!permission) {
@@ -42,6 +44,8 @@ export const QRScannerModal = ({ isVisible, onClose, onScan }: QRScannerModalPro
             <View style={styles.container}>
                 {!permission.granted ? (
                     <View style={styles.permissionContainer}>
+                        <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
+                        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
                         <GlassView intensity={40} borderRadius={32} style={styles.permissionContent}>
                             <Feather name="camera" size={48} color="#9EB294" />
                             <Text style={styles.permissionText}>Camera access is required to scan QR codes</Text>
@@ -117,7 +121,9 @@ const styles = StyleSheet.create({
         padding: 32,
         alignItems: 'center',
         width: '100%',
-        backgroundColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
     },
     permissionText: {
         color: '#F2F0E8',

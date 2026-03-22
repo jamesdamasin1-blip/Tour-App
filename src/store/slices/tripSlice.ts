@@ -1,0 +1,265 @@
+import { StateCreator } from 'zustand';
+import { TripPlan, Wallet, TripMember, BUDDY_COLORS } from '../../types/models';
+import { generateId } from '../../utils/mathUtils';
+import { offlineSync, validateImportedTrip } from '../storeHelpers';
+import type { AppState } from '../useStore';
+
+export interface TripSlice {
+    trips: TripPlan[];
+    addTrip: (trip: Omit<TripPlan, 'id' | 'isCompleted' | 'lastModified' | 'wallets'> & { wallets: Omit<Wallet, 'id' | 'tripId' | 'spentAmount'>[] }) => string;
+    updateTrip: (id: string, trip: Partial<TripPlan>) => void;
+    deleteTrip: (id: string) => void;
+    toggleTripCompletion: (id: string) => void;
+    importTrip: (tripData: any) => void;
+    updateWalletBaseline: (tripId: string, walletId: string, rate: number, source: 'initial' | 'user') => void;
+    addMember: (tripId: string, name: string, opts?: { userId?: string; email?: string }) => TripMember | null;
+    removeMember: (tripId: string, memberId: string) => void;
+    updateMemberRole: (tripId: string, memberId: string, role: 'editor' | 'viewer') => void;
+    /** @deprecated Use addMember */
+    addBuddy: (tripId: string, name: string) => TripMember | null;
+    /** @deprecated Use removeMember */
+    removeBuddy: (tripId: string, buddyId: string) => void;
+}
+
+export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, _get) => ({
+    trips: [],
+
+    addTrip: (tripData) => {
+        const id = generateId();
+        const lastModified = Date.now();
+
+        const wallets: Wallet[] = tripData.wallets.map(w => ({
+            ...w,
+            id: generateId(),
+            tripId: id,
+            spentAmount: 0,
+            version: 1,
+            deletedAt: null,
+        }));
+
+        const newTrip: TripPlan = {
+            ...tripData,
+            id,
+            wallets,
+            isCompleted: false,
+            lastModified,
+            tripCurrency: wallets[0]?.currency || tripData.homeCurrency,
+            totalBudgetTrip: wallets[0]?.totalBudget || 0,
+            totalBudget: wallets.reduce((acc, w) => acc + (w.totalBudget / (w.defaultRate || 1)), 0),
+            currency: wallets[0]?.currency || tripData.homeCurrency,
+            version: 1,
+            deletedAt: null,
+        } as TripPlan;
+
+        set((state) => ({
+            trips: [...state.trips, newTrip]
+        }));
+
+        offlineSync.trip(newTrip);
+        wallets.forEach(w => offlineSync.wallet(w));
+
+        return id;
+    },
+
+    updateTrip: (id, tripData) =>
+        set((state) => {
+            const updated = state.trips.map(t => t.id === id ? { ...t, ...tripData, lastModified: Date.now() } : t);
+            const trip = updated.find(t => t.id === id);
+            if (trip) offlineSync.tripUpdate(id, trip);
+            return { trips: updated };
+        }),
+
+    deleteTrip: (id) =>
+        set((state) => {
+            // Soft delete: enqueue DELETE events which the sync engine
+            // will convert to UPDATE deleted_at = now() on push
+            state.activities.filter(a => a.tripId === id).forEach(a => offlineSync.activityDelete(a.id));
+            state.expenses.filter(e => e.tripId === id).forEach(e => offlineSync.expenseDelete(e.id));
+            offlineSync.tripDelete(id);
+
+            // Remove from local UI immediately (server uses soft delete)
+            return {
+                trips: state.trips.filter(t => t.id !== id),
+                activities: state.activities.filter(a => a.tripId !== id),
+                expenses: state.expenses.filter(e => e.tripId !== id),
+            };
+        }),
+
+    toggleTripCompletion: (id) =>
+        set((state) => {
+            const trip = state.trips.find(t => t.id === id);
+            if (!trip) return state;
+
+            const lastModified = Date.now();
+            const isCompleted = !trip.isCompleted;
+
+            offlineSync.tripUpdate(id, { ...trip, isCompleted, lastModified });
+
+            return {
+                trips: state.trips.map(t => t.id === id ? { ...t, isCompleted, lastModified } : t)
+            };
+        }),
+
+    importTrip: (tripData: any) =>
+        set((state) => {
+            if (!validateImportedTrip(tripData)) {
+                console.error('[importTrip] Invalid trip data — schema validation failed');
+                return state;
+            }
+
+            const existingTrip = state.trips.find(t => t.id === tripData.id);
+
+            if (existingTrip && existingTrip.lastModified >= tripData.lastModified) {
+                return state;
+            }
+
+            const newActivities = (tripData.activities || []).map((a: any) => ({ ...a }));
+            const { activities: _stripped, ...cleanTrip } = tripData;
+
+            // Only enqueue sync pushes for LOCAL trips. Cloud-synced trips (from QR/code
+            // invites) already exist on the server — pushing them would overwrite the
+            // creator's data with the joiner's user_id and stale snapshot.
+            const isCloudImport = tripData.isCloudSynced === true;
+            if (!isCloudImport) {
+                if (existingTrip) {
+                    offlineSync.tripUpdate(tripData.id, cleanTrip);
+                } else {
+                    offlineSync.trip(cleanTrip);
+                }
+                newActivities.forEach((a: any) => offlineSync.activity(a));
+            }
+
+            // Extract embedded expenses from activities into the top-level expenses
+            // array so they're available for broadcasting and expense-based calculations.
+            const embeddedExpenses: any[] = [];
+            for (const a of newActivities) {
+                if (a.expenses?.length) {
+                    for (const e of a.expenses) {
+                        embeddedExpenses.push({ ...e, tripId: a.tripId, activityId: a.id });
+                    }
+                }
+            }
+
+            if (existingTrip) {
+                return {
+                    trips: state.trips.map(t => t.id === tripData.id ? cleanTrip : t),
+                    activities: [
+                        ...state.activities.filter(a => a.tripId !== tripData.id),
+                        ...newActivities
+                    ],
+                    expenses: [
+                        ...state.expenses.filter(e => e.tripId !== tripData.id),
+                        ...embeddedExpenses
+                    ],
+                };
+            }
+
+            return {
+                trips: [...state.trips, cleanTrip],
+                activities: [...state.activities, ...newActivities],
+                expenses: [...state.expenses, ...embeddedExpenses],
+            };
+        }),
+
+    addMember: (tripId, name, opts) => {
+        let newMember: TripMember | null = null;
+        set((state) => {
+            const trip = state.trips.find(t => t.id === tripId);
+            if (!trip) return state;
+
+            const existing = trip.members || [];
+            const usedColors = existing.map(m => m.color);
+            const availableColor = BUDDY_COLORS.find(c => !usedColors.includes(c)) || BUDDY_COLORS[existing.length % BUDDY_COLORS.length];
+
+            // If no members yet, auto-add creator as first member
+            let members = [...existing];
+            if (members.length === 0) {
+                const creatorColor = BUDDY_COLORS.find(c => c !== availableColor) || BUDDY_COLORS[0];
+                members.push({
+                    id: generateId(),
+                    name: 'Me',
+                    color: creatorColor,
+                    isCreator: true,
+                    addedAt: Date.now() - 1,
+                });
+            }
+
+            newMember = {
+                id: generateId(),
+                name: name.trim(),
+                color: availableColor,
+                role: 'editor',
+                userId: opts?.userId,
+                email: opts?.email,
+                addedAt: Date.now(),
+            };
+            members.push(newMember);
+
+            const updated = state.trips.map(t => t.id === tripId ? { ...t, members, lastModified: Date.now() } : t);
+            const trip2 = updated.find(t => t.id === tripId);
+            if (trip2) offlineSync.tripUpdate(tripId, trip2);
+            return { trips: updated };
+        });
+        return newMember;
+    },
+
+    removeMember: (tripId, memberId) =>
+        set((state) => {
+            const trip = state.trips.find(t => t.id === tripId);
+            if (!trip) return state;
+            const members = (trip.members || []).filter(m => m.id !== memberId);
+            // Only clear members array if no non-creator members remain
+            const hasNonCreator = members.some(m => !m.isCreator);
+            const finalMembers = hasNonCreator ? members : [];
+            const updated = state.trips.map(t => t.id === tripId ? { ...t, members: finalMembers, lastModified: Date.now() } : t);
+            const trip2 = updated.find(t => t.id === tripId);
+            if (trip2) offlineSync.tripUpdate(tripId, trip2);
+            return { trips: updated };
+        }),
+
+    updateMemberRole: (tripId, memberId, role) =>
+        set((state) => {
+            const trip = state.trips.find(t => t.id === tripId);
+            if (!trip) return state;
+            const members = (trip.members || []).map(m =>
+                m.id === memberId ? { ...m, role } : m
+            );
+            const lastModified = Date.now();
+            const updated = state.trips.map(t =>
+                t.id === tripId ? { ...t, members, lastModified } : t
+            );
+            const trip2 = updated.find(t => t.id === tripId);
+            if (trip2) offlineSync.tripUpdate(tripId, trip2);
+            return { trips: updated };
+        }),
+
+    // Deprecated aliases
+    addBuddy: (tripId, name) => {
+        const self = _get();
+        return self.addMember(tripId, name);
+    },
+    removeBuddy: (tripId, buddyId) => {
+        const self = _get();
+        self.removeMember(tripId, buddyId);
+    },
+
+    updateWalletBaseline: (tripId, walletId, rate, source) =>
+        set((state) => {
+            const lastModified = Date.now();
+            const trips = state.trips.map(t => {
+                if (t.id === tripId) {
+                    const updated = {
+                        ...t,
+                        lastModified,
+                        wallets: (t.wallets || []).map(w =>
+                            w.id === walletId ? { ...w, baselineExchangeRate: rate, baselineSource: source } : w
+                        )
+                    };
+                    offlineSync.tripUpdate(tripId, updated);
+                    return updated;
+                }
+                return t;
+            });
+            return { trips };
+        }),
+});
