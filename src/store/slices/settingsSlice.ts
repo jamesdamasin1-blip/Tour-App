@@ -9,6 +9,24 @@ export interface SettingsSlice {
     cacheRates: (rates: any) => void;
     theme: 'light' | 'dark';
     toggleTheme: () => void;
+    walletError: string | null;
+    clearWalletError: () => void;
+    currentUserId: string | null;
+    setCurrentUserId: (id: string | null) => void;
+    deletionRequests: DeletionRequest[];
+    addDeletionRequest: (req: DeletionRequest) => void;
+    removeDeletionRequest: (requestId: string) => void;
+}
+
+export interface DeletionRequest {
+    id: string;
+    tripId: string;
+    activityId: string;
+    activityTitle: string;
+    requestedByMemberId: string;
+    requestedByName: string;
+    requestedByColor: string;
+    requestedAt: number;
 }
 
 export const createSettingsSlice: StateCreator<AppState, [], [], SettingsSlice> = (set) => ({
@@ -27,4 +45,14 @@ export const createSettingsSlice: StateCreator<AppState, [], [], SettingsSlice> 
 
     theme: 'light',
     toggleTheme: () => set((state: AppState) => ({ theme: state.theme === 'light' ? 'dark' : 'light' })),
+
+    walletError: null,
+    clearWalletError: () => set(() => ({ walletError: null })),
+
+    currentUserId: null as string | null,
+    setCurrentUserId: (id: string | null) => set(() => ({ currentUserId: id })),
+
+    deletionRequests: [],
+    addDeletionRequest: (req) => set((s) => ({ deletionRequests: [...s.deletionRequests, req] })),
+    removeDeletionRequest: (requestId) => set((s) => ({ deletionRequests: s.deletionRequests.filter(r => r.id !== requestId) })),
 });

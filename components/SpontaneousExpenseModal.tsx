@@ -54,7 +54,6 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
     const [category, setCategory] = useState<ExpenseCategory>('Other');
     const [selectedWalletId, setSelectedWalletId] = useState('');
     const [selectedCurrency, setSelectedCurrency] = useState('PHP');
-    const [isCurrencyModalVisible, setIsCurrencyModalVisible] = useState(false);
     const [isWalletModalVisible, setIsWalletModalVisible] = useState(false);
 
     const activeWallet = useMemo(() => {
@@ -131,21 +130,24 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
         <Modal
             visible={visible}
             transparent
-            animationType="slide"
+            animationType="fade"
             onRequestClose={onClose}
         >
             <View style={styles.centeredView}>
                 <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-                <TouchableOpacity 
-                    style={styles.overlay} 
-                    activeOpacity={1} 
-                    onPress={onClose} 
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
+                <TouchableOpacity
+                    style={StyleSheet.absoluteFill}
+                    activeOpacity={1}
+                    onPress={onClose}
                 />
-                
-                <KeyboardAvoidingView 
+
+                <KeyboardAvoidingView
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                     style={styles.container}
+                    pointerEvents="box-none"
                 >
+                    <TouchableOpacity activeOpacity={1} style={styles.cardWrapper}>
                     <GlassView
                         intensity={isDark ? 50 : 95}
                         borderRadius={32}
@@ -193,7 +195,7 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
                                 onAmountChange={setAmount}
                                 currency={selectedCurrency}
                                 onCurrencyChange={setSelectedCurrency}
-                                onCurrencyPress={() => setIsCurrencyModalVisible(true)}
+                                options={tripCurrency !== homeCurrency ? [tripCurrency, homeCurrency] : [tripCurrency]}
                                 editable={true}
                             />
 
@@ -248,45 +250,9 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
                             <Feather name="check-circle" size={20} color={isDark ? "#1a1a1a" : "#fff"} style={{ marginLeft: 8 }} />
                         </TouchableOpacity>
                     </GlassView>
+                    </TouchableOpacity>
                 </KeyboardAvoidingView>
             </View>
-
-            {/* Currency Selection Modal Internal */}
-            <Modal
-                transparent
-                visible={isCurrencyModalVisible}
-                animationType="fade"
-            >
-                <View style={{ flex: 1 }}>
-                    <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-                    <TouchableOpacity 
-                        style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.45)', justifyContent: 'center', alignItems: 'center' }}
-                        activeOpacity={1}
-                        onPress={() => setIsCurrencyModalVisible(false)}
-                    >
-                        <GlassView
-                            style={{ borderRadius: 32, padding: 32, width: SCREEN_WIDTH - 64 }}
-                            intensity={isDark ? 80 : 95}
-                            backgroundColor={isDark ? "#1a1a1a" : "white"}
-                        >
-                            <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#F2F0E8' : '#1a1a1a', textTransform: 'uppercase', marginBottom: 24, textAlign: 'center' }}>Select Currency</Text>
-                            {[tripCurrency, homeCurrency].map((item) => (
-                                <TouchableOpacity
-                                    key={item}
-                                    style={[styles.currencyItem, item === selectedCurrency && { backgroundColor: isDark ? 'rgba(158,178,148,0.1)' : 'rgba(93,109,84,0.05)', borderColor: isDark ? '#B2C4AA' : '#5D6D54' }]}
-                                    onPress={() => {
-                                        setSelectedCurrency(item);
-                                        setIsCurrencyModalVisible(false);
-                                    }}
-                                >
-                                    <Text style={[styles.currencyItemText, { color: isDark ? '#F2F0E8' : '#1a1a1a' }]}>{item}</Text>
-                                    {item === selectedCurrency && <Feather name="check-circle" size={20} color={isDark ? "#B2C4AA" : "#5D6D54"} />}
-                                </TouchableOpacity>
-                            ))}
-                        </GlassView>
-                    </TouchableOpacity>
-                </View>
-            </Modal>
 
             {/* Wallet Selection Modal */}
             <Modal
@@ -335,25 +301,23 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
 const styles = StyleSheet.create({
     centeredView: {
         flex: 1,
-        justifyContent: 'flex-end',
-    },
-    overlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.45)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     container: {
         width: '100%',
+        paddingHorizontal: 20,
+        alignItems: 'center',
+    },
+    cardWrapper: {
+        width: '100%',
+        maxWidth: 420,
     },
     modalView: {
         width: '100%',
         padding: 24,
-        paddingBottom: Platform.OS === 'ios' ? 48 : 32,
-        borderBottomLeftRadius: 0,
-        borderBottomRightRadius: 0,
+        paddingBottom: 28,
+        maxHeight: '90%',
     },
     header: {
         flexDirection: 'row',

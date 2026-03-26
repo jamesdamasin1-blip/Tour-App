@@ -1,20 +1,20 @@
 import { StateCreator } from 'zustand';
 import { TripPlan, Wallet, TripMember, BUDDY_COLORS } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
-import { offlineSync, validateImportedTrip } from '../storeHelpers';
+import { offlineSync, validateImportedTrip, stampFieldUpdates } from '../storeHelpers';
 import type { AppState } from '../useStore';
 
 export interface TripSlice {
     trips: TripPlan[];
-    addTrip: (trip: Omit<TripPlan, 'id' | 'isCompleted' | 'lastModified' | 'wallets'> & { wallets: Omit<Wallet, 'id' | 'tripId' | 'spentAmount'>[] }) => string;
-    updateTrip: (id: string, trip: Partial<TripPlan>) => void;
-    deleteTrip: (id: string) => void;
-    toggleTripCompletion: (id: string) => void;
+    addTrip: (trip: Omit<TripPlan, 'id' | 'isCompleted' | 'lastModified' | 'wallets'> & { id?: string, wallets: (Omit<Wallet, 'id' | 'tripId' | 'spentAmount'> & { id?: string })[] }, fromSync?: boolean) => string;
+    updateTrip: (id: string, trip: Partial<TripPlan>, fromSync?: boolean) => void;
+    deleteTrip: (id: string, fromSync?: boolean) => void;
+    toggleTripCompletion: (id: string, fromSync?: boolean) => void;
     importTrip: (tripData: any) => void;
-    updateWalletBaseline: (tripId: string, walletId: string, rate: number, source: 'initial' | 'user') => void;
-    addMember: (tripId: string, name: string, opts?: { userId?: string; email?: string }) => TripMember | null;
-    removeMember: (tripId: string, memberId: string) => void;
-    updateMemberRole: (tripId: string, memberId: string, role: 'editor' | 'viewer') => void;
+    updateWalletBaseline: (tripId: string, walletId: string, rate: number, source: 'initial' | 'user', fromSync?: boolean) => void;
+    addMember: (tripId: string, name: string, opts?: { userId?: string; email?: string }, fromSync?: boolean) => TripMember | null;
+    removeMember: (tripId: string, memberId: string, fromSync?: boolean) => void;
+    updateMemberRole: (tripId: string, memberId: string, role: 'editor' | 'viewer', fromSync?: boolean) => void;
     /** @deprecated Use addMember */
     addBuddy: (tripId: string, name: string) => TripMember | null;
     /** @deprecated Use removeMember */
@@ -24,18 +24,21 @@ export interface TripSlice {
 export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, _get) => ({
     trips: [],
 
-    addTrip: (tripData) => {
-        const id = generateId();
+    addTrip: (tripData, fromSync) => {
+        const id = tripData.id || generateId();
         const lastModified = Date.now();
 
         const wallets: Wallet[] = tripData.wallets.map(w => ({
             ...w,
-            id: generateId(),
+            id: w.id || generateId(),
             tripId: id,
             spentAmount: 0,
             version: 1,
+            createdAt: Date.now(),
             deletedAt: null,
+            fieldUpdates: {},
         }));
+        wallets.forEach(w => w.fieldUpdates = stampFieldUpdates({}, w));
 
         const newTrip: TripPlan = {
             ...tripData,
@@ -50,32 +53,45 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, 
             version: 1,
             deletedAt: null,
         } as TripPlan;
+        newTrip.fieldUpdates = stampFieldUpdates({}, newTrip);
 
         set((state) => ({
             trips: [...state.trips, newTrip]
         }));
 
-        offlineSync.trip(newTrip);
-        wallets.forEach(w => offlineSync.wallet(w));
+        if (!fromSync) {
+            offlineSync.trip(newTrip);
+            wallets.forEach(w => offlineSync.wallet(w));
+        }
 
         return id;
     },
 
-    updateTrip: (id, tripData) =>
+    updateTrip: (id, tripData, fromSync) =>
         set((state) => {
-            const updated = state.trips.map(t => t.id === id ? { ...t, ...tripData, lastModified: Date.now() } : t);
+            const lastModified = Date.now();
+            const updated = state.trips.map(t => {
+                if (t.id === id) {
+                    const result = { ...t, ...tripData, lastModified };
+                    result.fieldUpdates = stampFieldUpdates(t.fieldUpdates, tripData, lastModified);
+                    return result;
+                }
+                return t;
+            });
             const trip = updated.find(t => t.id === id);
-            if (trip) offlineSync.tripUpdate(id, trip);
+            if (trip && !fromSync) offlineSync.tripUpdate(id, trip);
             return { trips: updated };
         }),
 
-    deleteTrip: (id) =>
+    deleteTrip: (id, fromSync) =>
         set((state) => {
-            // Soft delete: enqueue DELETE events which the sync engine
-            // will convert to UPDATE deleted_at = now() on push
-            state.activities.filter(a => a.tripId === id).forEach(a => offlineSync.activityDelete(a.id));
-            state.expenses.filter(e => e.tripId === id).forEach(e => offlineSync.expenseDelete(e.id));
-            offlineSync.tripDelete(id);
+            if (!fromSync) {
+                // Soft delete: enqueue DELETE events which the sync engine
+                // will convert to UPDATE deleted_at = now() on push
+                state.activities.filter(a => a.tripId === id).forEach(a => offlineSync.activityDelete(a.id));
+                state.expenses.filter(e => e.tripId === id).forEach(e => offlineSync.expenseDelete(e.id));
+                offlineSync.tripDelete(id);
+            }
 
             // Remove from local UI immediately (server uses soft delete)
             return {
@@ -85,18 +101,21 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, 
             };
         }),
 
-    toggleTripCompletion: (id) =>
+    toggleTripCompletion: (id, fromSync) =>
         set((state) => {
             const trip = state.trips.find(t => t.id === id);
             if (!trip) return state;
 
             const lastModified = Date.now();
             const isCompleted = !trip.isCompleted;
+            const fieldUpdates = stampFieldUpdates(trip.fieldUpdates, { isCompleted }, lastModified);
 
-            offlineSync.tripUpdate(id, { ...trip, isCompleted, lastModified });
+            const updatedTrip = { ...trip, isCompleted, lastModified, fieldUpdates };
+
+            if (!fromSync) offlineSync.tripUpdate(id, updatedTrip);
 
             return {
-                trips: state.trips.map(t => t.id === id ? { ...t, isCompleted, lastModified } : t)
+                trips: state.trips.map(t => t.id === id ? updatedTrip : t)
             };
         }),
 
@@ -161,7 +180,7 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, 
             };
         }),
 
-    addMember: (tripId, name, opts) => {
+    addMember: (tripId, name, opts, fromSync) => {
         let newMember: TripMember | null = null;
         set((state) => {
             const trip = state.trips.find(t => t.id === tripId);
@@ -195,29 +214,48 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, 
             };
             members.push(newMember);
 
-            const updated = state.trips.map(t => t.id === tripId ? { ...t, members, lastModified: Date.now() } : t);
+            const lastModified = Date.now();
+            const updated = state.trips.map(t => {
+                if (t.id === tripId) {
+                    return { ...t, members, lastModified, fieldUpdates: stampFieldUpdates(t.fieldUpdates, { members }, lastModified) };
+                }
+                return t;
+            });
             const trip2 = updated.find(t => t.id === tripId);
-            if (trip2) offlineSync.tripUpdate(tripId, trip2);
+            if (trip2 && !fromSync) offlineSync.tripUpdate(tripId, trip2);
             return { trips: updated };
         });
         return newMember;
     },
 
-    removeMember: (tripId, memberId) =>
+    removeMember: (tripId, memberId, fromSync) =>
         set((state) => {
             const trip = state.trips.find(t => t.id === tripId);
             if (!trip) return state;
-            const members = (trip.members || []).filter(m => m.id !== memberId);
-            // Only clear members array if no non-creator members remain
-            const hasNonCreator = members.some(m => !m.isCreator);
-            const finalMembers = hasNonCreator ? members : [];
-            const updated = state.trips.map(t => t.id === tripId ? { ...t, members: finalMembers, lastModified: Date.now() } : t);
+            const removedMember = (trip.members || []).find(m => m.id === memberId);
+            // Mark member as removed (keep entry so their userId can be checked on their device)
+            const members = (trip.members || []).map(m =>
+                m.id === memberId ? { ...m, removed: true } : m
+            );
+            // Track removed userId for sync blocking
+            const removedUserId = removedMember?.userId;
+            const removedMemberUserIds = [
+                ...((trip as any).removedMemberUserIds || []),
+                ...(removedUserId ? [removedUserId] : []),
+            ].filter((v, i, a) => a.indexOf(v) === i); // dedupe
+            const lastModified = Date.now();
+            const updated = state.trips.map(t => {
+                if (t.id === tripId) {
+                    return { ...t, members, removedMemberUserIds, lastModified, fieldUpdates: stampFieldUpdates(t.fieldUpdates, { members }, lastModified) };
+                }
+                return t;
+            });
             const trip2 = updated.find(t => t.id === tripId);
-            if (trip2) offlineSync.tripUpdate(tripId, trip2);
+            if (trip2 && !fromSync) offlineSync.tripUpdate(tripId, trip2);
             return { trips: updated };
         }),
 
-    updateMemberRole: (tripId, memberId, role) =>
+    updateMemberRole: (tripId, memberId, role, fromSync) =>
         set((state) => {
             const trip = state.trips.find(t => t.id === tripId);
             if (!trip) return state;
@@ -225,11 +263,14 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, 
                 m.id === memberId ? { ...m, role } : m
             );
             const lastModified = Date.now();
-            const updated = state.trips.map(t =>
-                t.id === tripId ? { ...t, members, lastModified } : t
-            );
+            const updated = state.trips.map(t => {
+                if (t.id === tripId) {
+                    return { ...t, members, lastModified, fieldUpdates: stampFieldUpdates(t.fieldUpdates, { members }, lastModified) };
+                }
+                return t;
+            });
             const trip2 = updated.find(t => t.id === tripId);
-            if (trip2) offlineSync.tripUpdate(tripId, trip2);
+            if (trip2 && !fromSync) offlineSync.tripUpdate(tripId, trip2);
             return { trips: updated };
         }),
 
@@ -243,7 +284,7 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, 
         self.removeMember(tripId, buddyId);
     },
 
-    updateWalletBaseline: (tripId, walletId, rate, source) =>
+    updateWalletBaseline: (tripId, walletId, rate, source, fromSync) =>
         set((state) => {
             const lastModified = Date.now();
             const trips = state.trips.map(t => {
@@ -251,11 +292,18 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, 
                     const updated = {
                         ...t,
                         lastModified,
-                        wallets: (t.wallets || []).map(w =>
-                            w.id === walletId ? { ...w, baselineExchangeRate: rate, baselineSource: source } : w
-                        )
+                        wallets: (t.wallets || []).map(w => {
+                            if (w.id === walletId) {
+                                const newW = { ...w, baselineExchangeRate: rate, baselineSource: source };
+                                newW.fieldUpdates = stampFieldUpdates(w.fieldUpdates, { baselineExchangeRate: rate, baselineSource: source }, lastModified);
+                                if (!fromSync) offlineSync.walletUpdate(walletId, newW);
+                                return newW;
+                            }
+                            return w;
+                        })
                     };
-                    offlineSync.tripUpdate(tripId, updated);
+                    updated.fieldUpdates = stampFieldUpdates(t.fieldUpdates, { wallets: updated.wallets }, lastModified);
+                    if (!fromSync) offlineSync.tripUpdate(tripId, updated);
                     return updated;
                 }
                 return t;

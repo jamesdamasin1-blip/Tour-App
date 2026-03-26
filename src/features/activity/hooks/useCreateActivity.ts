@@ -176,9 +176,12 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
             if (numericActualCost !== null) {
                 const currentSpent = calculatedTotalSpent;
 
-                if (Math.abs(numericActualCost - currentSpent) > 0.01) {
-                    const diff = numericActualCost - currentSpent;
-                    
+                const diff = numericActualCost - currentSpent;
+                if (diff > 0.01) {
+                    // Only create an adjustment expense when adding MORE cost.
+                    // Negative diffs (reducing cost) cannot be expressed as an expense
+                    // in the FIFO system — the user must delete individual expenses instead.
+
                     // Convert diff to wallet (trip) currency and home currency
                     // effectiveRate = home per wallet (e.g. 1 MYR = 15.3 PHP → rate=15.3)
                     // fromHome: homeAmount / rate  |  toHome: tripAmount * rate

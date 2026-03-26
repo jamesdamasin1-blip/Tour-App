@@ -2,7 +2,7 @@
   "expo": {
     "name": "Aliqual",
     "slug": "aliqual",
-    "version": "1.3.4",
+    "version": "1.3.35",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "aliqual",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.aliqual.app",
-      "versionCode": 27,
+      "versionCode": 58,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

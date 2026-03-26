@@ -3,7 +3,7 @@ import { Activity, Expense, Wallet } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
 import { applyExpenseFIFO } from '../../finance/expense/expenseEngine';
 import { getDefaultLot } from '../../finance/wallet/walletEngine';
-import { offlineSync, reverseFIFO, recomputeWalletSpent } from '../storeHelpers';
+import { offlineSync, reverseFIFO, recomputeWalletSpent, stampFieldUpdates } from '../storeHelpers';
 import type { AppState } from '../useStore';
 
 export interface ActivitySlice {
@@ -26,6 +26,7 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
                 lastModified: Date.now(),
                 version: 1,
                 deletedAt: null,
+                fieldUpdates: stampFieldUpdates({}, activityData),
             };
 
             offlineSync.activity(newActivity);
@@ -72,7 +73,8 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
                 ...activity,
                 ...activityData,
                 expenses: finalExpenses,
-                lastModified
+                lastModified,
+                fieldUpdates: stampFieldUpdates(activity.fieldUpdates, activityData, lastModified, ['expenses', 'recalculateExpenses']),
             };
 
             offlineSync.activityUpdate(id, updated);
@@ -161,11 +163,12 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
 
             const lastModified = Date.now();
             const isCompleted = !activity.isCompleted;
+            const fieldUpdates = stampFieldUpdates(activity.fieldUpdates, { isCompleted }, lastModified);
 
-            offlineSync.activityUpdate(id, { ...activity, isCompleted, lastModified });
+            offlineSync.activityUpdate(id, { ...activity, isCompleted, lastModified, fieldUpdates });
 
             return {
-                activities: state.activities.map(a => a.id === id ? { ...a, isCompleted, lastModified } : a),
+                activities: state.activities.map(a => a.id === id ? { ...a, isCompleted, lastModified, fieldUpdates } : a),
                 trips: state.trips.map(t => t.id === activity.tripId ? { ...t, lastModified } : t)
             };
         }),

@@ -25,15 +25,13 @@ export const DurationPickerModal = ({ visible, onClose, startDate, endDate, onDa
             <View className="flex-1 justify-center items-center px-6">
                 <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
-                <View style={{
-                    backgroundColor: isDark ? '#282C26' : 'rgba(242, 240, 228, 0.98)',
-                    borderRadius: 32,
-                    padding: 24,
-                    borderWidth: 1,
-                    borderColor: isDark ? 'rgba(158,178,148,0.1)' : 'rgba(255,255,255,0.4)',
-                    width: '100%',
-                    minHeight: 450
-                }}>
+                <GlassView
+                    intensity={isDark ? 80 : 100}
+                    borderRadius={32}
+                    backgroundColor={isDark ? 'rgba(30, 34, 28, 0.97)' : 'rgba(255, 255, 255, 0.98)'}
+                    borderColor={isDark ? 'rgba(158,178,148,0.2)' : 'rgba(93,109,84,0.15)'}
+                    style={{ width: '100%', padding: 24, minHeight: 450 }}
+                >
                     <View className="flex-row items-center justify-between mb-4">
                         <Text className={`text-xl font-black uppercase tracking-tight ${isDark ? 'text-[#F2F0E8]' : 'text-[#1a1a1a]'}`}>Select Trip Dates</Text>
                         <TouchableOpacity onPress={onClose} className="p-2">
@@ -84,7 +82,7 @@ export const DurationPickerModal = ({ visible, onClose, startDate, endDate, onDa
                             <Text className="text-white font-bold uppercase tracking-wider">Confirm</Text>
                         </TouchableOpacity>
                     )}
-                </View>
+                </GlassView>
             </View>
         </Modal>
     );

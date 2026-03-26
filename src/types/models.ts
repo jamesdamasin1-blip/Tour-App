@@ -19,6 +19,8 @@ export interface Wallet {
     version: number;         // Server-managed, monotonically increasing
     updatedBy?: string;      // Supabase auth user_id of last editor
     deletedAt?: string | null; // ISO timestamp if soft-deleted, null if alive
+    fieldUpdates?: Record<string, number>; // CRDT-lite field-level timestamp tracking
+    lastDeviceId?: string; // Origin tracking to prevent self-echo overwrite
 }
 
 export interface Expense {
@@ -45,6 +47,8 @@ export interface Expense {
     version: number;         // Server-managed, monotonically increasing
     updatedBy?: string;      // Supabase auth user_id of last editor
     deletedAt?: string | null; // ISO timestamp if soft-deleted, null if alive
+    fieldUpdates?: Record<string, number>;
+    lastDeviceId?: string;
 }
 
 export interface ExchangeEvent {
@@ -60,6 +64,8 @@ export interface ExchangeEvent {
     version: number;
     updatedBy?: string;
     deletedAt?: string | null;
+    fieldUpdates?: Record<string, number>;
+    lastDeviceId?: string;
 }
 
 export const BUDDY_COLORS = [
@@ -86,6 +92,7 @@ export interface TripMember {
     role?: 'editor' | 'viewer'; // undefined defaults to 'editor' for backward compat
     userId?: string;     // linked Supabase auth user id
     email?: string;      // linked user email
+    removed?: boolean;   // true when creator has removed this member
     addedAt: number;
 }
 
@@ -113,6 +120,8 @@ export interface Activity {
     version: number;         // Server-managed, monotonically increasing
     updatedBy?: string;      // Supabase auth user_id of last editor
     deletedAt?: string | null; // ISO timestamp if soft-deleted, null if alive
+    fieldUpdates?: Record<string, number>;
+    lastDeviceId?: string;
 }
 
 export interface TripInvite {
@@ -145,6 +154,7 @@ export interface TripPlan {
 
     // Derived Aggregates (can be cached)
     totalBudgetHomeCached: number; // Total budget across all wallets in Home Currency
+    spontaneousEvents?: { id: string; amount: number }[]; // Audit trail for spontaneous spent accumulation
 
     // Legacy support (to be transitioned)
     tripCurrency: string;
@@ -154,6 +164,7 @@ export interface TripPlan {
 
     countries: string[];
     members?: TripMember[]; // trip members
+    removedMemberUserIds?: string[]; // userIds blocked from receiving sync
     isCompleted: boolean;
     lastModified: number;
     role?: 'admin' | 'viewer';
@@ -162,5 +173,7 @@ export interface TripPlan {
     version: number;         // Server-managed, monotonically increasing
     updatedBy?: string;      // Supabase auth user_id of last editor
     deletedAt?: string | null; // ISO timestamp if soft-deleted, null if alive
+    fieldUpdates?: Record<string, number>;
+    lastDeviceId?: string;
 }
 

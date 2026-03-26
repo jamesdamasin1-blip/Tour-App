@@ -1,25 +1,25 @@
 import { StateCreator } from 'zustand';
-import { Expense, ExpenseCategory, Wallet } from '../../types/models';
+import { Expense, ExpenseCategory, Wallet, Activity } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
 import { applyExpenseFIFO } from '../../finance/expense/expenseEngine';
 import { getDefaultLot } from '../../finance/wallet/walletEngine';
-import { offlineSync, reverseFIFO, recomputeWalletSpent } from '../storeHelpers';
+import { offlineSync, reverseFIFO, recomputeWalletSpent, stampFieldUpdates } from '../storeHelpers';
 import type { AppState } from '../useStore';
 
 export interface ExpenseSlice {
     expenses: Expense[];
-    addExpense: (tripId: string, walletId: string, activityId: string | undefined, expense: Omit<Expense, 'id' | 'tripId' | 'walletId' | 'activityId'>) => void;
-    updateExpense: (id: string, expense: Partial<Omit<Expense, 'id' | 'tripId' | 'walletId' | 'activityId'>>) => void;
-    deleteExpense: (id: string) => void;
+    addExpense: (tripId: string, walletId: string, activityId: string | undefined, expense: Omit<Expense, 'id' | 'tripId' | 'walletId' | 'activityId'> & { id?: string }, fromSync?: boolean) => void;
+    updateExpense: (id: string, expense: Partial<Omit<Expense, 'id' | 'tripId' | 'walletId' | 'activityId'>>, fromSync?: boolean) => void;
+    deleteExpense: (id: string, fromSync?: boolean) => void;
     logSpontaneousExpense: (tripId: string, walletId: string, data: { title: string, amount: number, category: ExpenseCategory, originalAmount?: number, originalCurrency?: string, date: number }) => void;
 }
 
 export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = (set) => ({
     expenses: [],
 
-    addExpense: (tripId, walletId, activityId, expenseData) =>
+    addExpense: (tripId, walletId, activityId, expenseData, fromSync) =>
         set((state) => {
-            const expenseId = generateId();
+            const expenseId = expenseData.id || generateId();
             const lastModified = Date.now();
             const trip = state.trips.find(t => t.id === tripId);
             const wallet = trip?.wallets?.find(w => w.id === walletId);
@@ -62,6 +62,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 version: 1,
                 deletedAt: null,
             };
+            newExpense.fieldUpdates = stampFieldUpdates({}, { ...newExpense });
 
             let updatedActivities = state.activities;
             if (activityId) {
@@ -70,7 +71,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 );
             }
 
-            offlineSync.expense(newExpense);
+            if (!fromSync) offlineSync.expense(newExpense);
 
             const allExpensesAfterAdd = [...state.expenses, newExpense];
 
@@ -79,16 +80,21 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 activities: updatedActivities,
                 trips: state.trips.map(t => {
                     if (t.id === tripId) {
+                        const finalWallets = (t.wallets || []).map((w): Wallet => w.id === walletId ? {
+                            ...w,
+                            lots: updatedWallet.lots,
+                            spentAmount: allExpensesAfterAdd
+                                .filter(e => e.walletId === w.id)
+                                .reduce((sum, e) => sum + (e.convertedAmountTrip || 0), 0)
+                        } : w);
+
+                        const targetW = finalWallets.find(w => w.id === walletId);
+                        if (targetW && !fromSync) offlineSync.walletUpdate(walletId, targetW);
+
                         return {
                             ...t,
                             lastModified,
-                            wallets: (t.wallets || []).map((w): Wallet => w.id === walletId ? {
-                                ...w,
-                                lots: updatedWallet.lots,
-                                spentAmount: allExpensesAfterAdd
-                                    .filter(e => e.walletId === w.id)
-                                    .reduce((sum, e) => sum + (e.convertedAmountTrip || 0), 0)
-                            } : w)
+                            wallets: finalWallets
                         };
                     }
                     return t;
@@ -96,7 +102,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
             };
         }),
 
-    updateExpense: (id, expenseData) =>
+    updateExpense: (id, expenseData, fromSync) =>
         set((state) => {
             const expense = state.expenses.find(e => e.id === id);
             if (!expense) return state;
@@ -125,6 +131,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 convertedAmountHome,
                 convertedAmountTrip,
             };
+            updatedExpense.fieldUpdates = stampFieldUpdates(expense.fieldUpdates, { ...expenseData, convertedAmountHome, convertedAmountTrip }, lastModified);
 
             let updatedActivities = state.activities;
             if (expense.activityId) {
@@ -139,7 +146,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 );
             }
 
-            offlineSync.expenseUpdate(id, updatedExpense);
+            if (!fromSync) offlineSync.expenseUpdate(id, updatedExpense);
 
             const updatedExpenses = state.expenses.map(e => e.id === id ? updatedExpense : e);
             return {
@@ -158,7 +165,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
             };
         }),
 
-    deleteExpense: (id) =>
+    deleteExpense: (id, fromSync) =>
         set((state) => {
             const expense = state.expenses.find(e => e.id === id);
             if (!expense) return state;
@@ -173,7 +180,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 );
             }
 
-            offlineSync.expenseDelete(id);
+            if (!fromSync) offlineSync.expenseDelete(id);
 
             const expensesAfterDelete = state.expenses.filter(e => e.id !== id);
 
@@ -184,15 +191,21 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                     if (t.id === expense.tripId) {
                         const restoredWallets: Wallet[] = t.wallets.map(w => {
                             if (w.id === expense.walletId) {
+                                const linkedA = state.activities.find(a => a.id === expense.activityId);
+                                if (linkedA?.isSpontaneous) return w; // Skip credit-back for spontaneous items Node triggers
                                 return { ...w, lots: reverseFIFO(w, expense) };
                             }
                             return w;
                         });
+                        const finalWallets = recomputeWalletSpent(restoredWallets, expensesAfterDelete);
+
+                        const targetW = finalWallets.find(w => w.id === expense.walletId);
+                        if (targetW && !fromSync) offlineSync.walletUpdate(expense.walletId, targetW);
 
                         return {
                             ...t,
                             lastModified,
-                            wallets: recomputeWalletSpent(restoredWallets, expensesAfterDelete),
+                            wallets: finalWallets,
                         };
                     }
                     return t;
@@ -219,8 +232,8 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 updatedWallet = fifoResult.updatedWallet;
                 breakdown = fifoResult.breakdown;
             } catch (e: any) {
-                console.error('applyExpenseFIFO Failed (spontaneous):', e);
-                return state;
+                console.warn('applyExpenseFIFO Failed (spontaneous):', e);
+                return { ...state, walletError: e.message || 'Check your wallet balances!' };
             }
 
             const defaultLot = getDefaultLot(wallet as any);
@@ -248,8 +261,9 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 version: 1,
                 deletedAt: null,
             };
+            newExpense.fieldUpdates = stampFieldUpdates({}, { ...newExpense });
 
-            const newActivity = {
+            const newActivity: Activity = {
                 id: activityId,
                 tripId: tripId,
                 walletId,
@@ -267,6 +281,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 version: 1,
                 deletedAt: null,
             };
+            newActivity.fieldUpdates = stampFieldUpdates({}, { ...newActivity });
 
             offlineSync.activity(newActivity);
             offlineSync.expense(newExpense);
@@ -277,17 +292,28 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 expenses: allExpensesAfterSpontaneous,
                 trips: state.trips.map(t => {
                     if (t.id === tripId) {
-                        return {
+                        const finalWallets = (t.wallets || []).map((w): Wallet => w.id === walletId ? {
+                            ...w,
+                            lots: updatedWallet.lots,
+                            spentAmount: allExpensesAfterSpontaneous
+                                .filter(e => e.walletId === w.id)
+                                .reduce((sum, e) => sum + (e.convertedAmountTrip || 0), 0)
+                        } : w);
+
+                        const targetW = finalWallets.find(w => w.id === walletId);
+                        if (targetW) offlineSync.walletUpdate(walletId, targetW);
+
+                        const currentEvents = t.spontaneousEvents || [];
+                        const updatedTrip = {
                             ...t,
                             lastModified: curTime,
-                            wallets: (t.wallets || []).map((w): Wallet => w.id === walletId ? {
-                                ...w,
-                                lots: updatedWallet.lots,
-                                spentAmount: allExpensesAfterSpontaneous
-                                    .filter(e => e.walletId === w.id)
-                                    .reduce((sum, e) => sum + (e.convertedAmountTrip || 0), 0)
-                            } : w)
+                            spontaneousEvents: [...currentEvents, { id: generateId(), amount: convertedAmountHome }],
+                            wallets: finalWallets
                         };
+
+                        offlineSync.tripUpdate(tripId, updatedTrip);
+
+                        return updatedTrip;
                     }
                     return t;
                 })

@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { ExchangeEvent } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
 import { addFundingLot, getFundingTotalGlobalHome } from '../../finance/wallet/walletEngine';
-import { offlineSync } from '../storeHelpers';
+import { offlineSync, stampFieldUpdates } from '../storeHelpers';
 import type { AppState } from '../useStore';
 
 export interface ExchangeEventSlice {
@@ -31,6 +31,7 @@ export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEv
                 rateBaseCurrency: 1,
                 notes: eventData.notes
             });
+            (updatedWallet as any).fieldUpdates = stampFieldUpdates(wallet.fieldUpdates, { lots: updatedWallet.lots }, Date.now());
 
             let updatedTrips = state.trips.map((t: any) =>
                 t.id === eventData.tripId ? {
@@ -48,17 +49,24 @@ export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEv
                         return sum + getFundingTotalGlobalHome(w, t.homeCurrency || 'PHP');
                     }, 0);
 
-                    return {
+                    const newTrip = {
                         ...t,
                         totalBudgetHomeCached: Math.round(totalBudgetHomeCached * 100) / 100
                     };
+                    newTrip.fieldUpdates = stampFieldUpdates(t.fieldUpdates, { totalBudgetHomeCached: newTrip.totalBudgetHomeCached }, Date.now());
+                    return newTrip;
                 }
                 return t;
             });
 
             const newEvent = { ...eventData, id, version: 1, deletedAt: null };
+            newEvent.fieldUpdates = stampFieldUpdates({}, { ...newEvent });
             offlineSync.exchangeEvent(newEvent);
             offlineSync.walletUpdate(eventData.walletId, updatedWallet);
+
+            // CRITICAL: Persist the parent trip as well, so the JSONB cache mirrors the wallet addition on pullRemoteUpdates!
+            const updatedTrip = updatedTrips.find((t: any) => t.id === eventData.tripId);
+            if (updatedTrip) offlineSync.tripUpdate(eventData.tripId, updatedTrip);
 
             return {
                 exchangeEvents: [...state.exchangeEvents, newEvent],
@@ -84,11 +92,13 @@ export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEv
                         .filter((e: any) => e.tripId === t.id)
                         .reduce((sum: number, e: any) => sum + e.homeAmount, 0);
 
-                    return {
+                    const newTrip = {
                         ...t,
                         totalBudgetHomeCached: Math.round((initialBudgetHome + addedBudgetHome) * 100) / 100,
                         lastModified: Date.now()
                     };
+                    newTrip.fieldUpdates = stampFieldUpdates(t.fieldUpdates, { totalBudgetHomeCached: newTrip.totalBudgetHomeCached }, newTrip.lastModified);
+                    return newTrip;
                 }
                 return t;
             });
@@ -108,7 +118,7 @@ export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEv
             const event = state.exchangeEvents.find((e: any) => e.id === id);
             if (!event) return state;
 
-            const updatedEvents = state.exchangeEvents.map((e: any) => e.id === id ? { ...e, ...data } : e);
+            const updatedEvents = state.exchangeEvents.map((e: any) => e.id === id ? { ...e, ...data, fieldUpdates: stampFieldUpdates(e.fieldUpdates, data, Date.now()) } : e);
 
             const updatedTrips = state.trips.map((t: any) => {
                 if (t.id === event.tripId) {
@@ -121,11 +131,13 @@ export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEv
                         .filter((e: any) => e.tripId === t.id)
                         .reduce((sum: number, e: any) => sum + e.homeAmount, 0);
 
-                    return {
+                    const newTrip = {
                         ...t,
                         totalBudgetHomeCached: Math.round((initialBudgetHome + addedBudgetHome) * 100) / 100,
                         lastModified: Date.now()
                     };
+                    newTrip.fieldUpdates = stampFieldUpdates(t.fieldUpdates, { totalBudgetHomeCached: newTrip.totalBudgetHomeCached }, newTrip.lastModified);
+                    return newTrip;
                 }
                 return t;
             });

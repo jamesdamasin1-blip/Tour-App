@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, TextInput, FlatList, Share } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, TextInput, FlatList, Share, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { useStore } from '@/src/store/useStore';
@@ -22,7 +22,7 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
     const { theme, trips, removeMember, updateMemberRole, activities, expenses } = useStore();
     const isDark = theme === 'dark';
     const trip = trips.find(t => t.id === tripId);
-    const members = trip?.members || [];
+    const members = (trip?.members || []).filter(m => !(m as any).removed);
     const { canManageMembers } = usePermissions(tripId);
 
     const [isAdding, setIsAdding] = useState<false | 'qr' | 'code'>(false);
@@ -40,6 +40,29 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
             isCloudSynced: true,
         };
         return base64Encode(JSON.stringify(shareData));
+    };
+
+    // Slim payload for QR — strips lots and activities to avoid QR size limit
+    const getQRPayload = () => {
+        if (!trip) return '';
+        const slimWallets = (trip.wallets || []).map((w: any) => ({
+            id: w.id, tripId: w.tripId, currency: w.currency,
+            totalBudget: w.totalBudget, spentAmount: w.spentAmount || 0,
+            defaultRate: w.defaultRate, baselineExchangeRate: w.baselineExchangeRate,
+            createdAt: w.createdAt, version: w.version || 1,
+        }));
+        const slim = {
+            id: trip.id, title: trip.title, homeCurrency: trip.homeCurrency,
+            countries: trip.countries, startDate: trip.startDate, endDate: trip.endDate,
+            totalBudget: trip.totalBudget, totalBudgetHomeCached: trip.totalBudgetHomeCached,
+            lastModified: trip.lastModified || Date.now(),
+            members: (trip.members || []).map((m: any) => ({
+                id: m.id, name: m.name, color: m.color, isCreator: m.isCreator, role: m.role, userId: m.userId,
+            })),
+            wallets: slimWallets,
+            role: 'admin', source: 'OrbitalGalileo', isCloudSynced: true, sharedAt: Date.now(),
+        };
+        return base64Encode(JSON.stringify(slim));
     };
 
     const handleShareCode = async () => {
@@ -67,9 +90,10 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
 
     return (
         <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
-            <BlurView intensity={isDark ? 40 : 20} tint={isDark ? 'dark' : 'light'} style={{ flex: 1 }}>
-                <TouchableOpacity style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }} activeOpacity={1} onPress={handleClose}>
-                    <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+            <BlurView intensity={isDark ? 40 : 20} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
+            <TouchableOpacity style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }} activeOpacity={1} onPress={handleClose}>
+                <TouchableOpacity activeOpacity={1} onPress={() => {}}>
                         <GlassView
                             intensity={isDark ? 30 : 90}
                             borderRadius={32}
@@ -154,19 +178,19 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
                                                                     paddingVertical: 3, paddingHorizontal: 8, borderRadius: 8,
                                                                     backgroundColor: item.role === 'viewer'
                                                                         ? 'rgba(239, 68, 68, 0.12)'
-                                                                        : 'rgba(34, 197, 94, 0.12)',
+                                                                        : (isDark ? 'rgba(178, 196, 170, 0.15)' : 'rgba(93, 109, 84, 0.12)'),
                                                                 }}
                                                             >
                                                                 <Text style={{
                                                                     fontSize: 8, fontWeight: '900', letterSpacing: 0.5,
-                                                                    color: item.role === 'viewer' ? '#ef4444' : '#22c55e',
+                                                                    color: item.role === 'viewer' ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54'),
                                                                 }}>
                                                                     {item.role === 'viewer' ? 'VIEW ONLY' : 'EDITOR'}
                                                                 </Text>
                                                             </TouchableOpacity>
                                                             {canManageMembers && (
                                                                 <TouchableOpacity onPress={() => setRemovingId(item.id)} style={{ padding: 6 }}>
-                                                                    <Feather name="x" size={14} color="#ef4444" />
+                                                                    <Feather name="user-minus" size={14} color="#ef4444" />
                                                                 </TouchableOpacity>
                                                             )}
                                                         </View>
@@ -183,7 +207,7 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
                                                 Ask them to scan this QR from the "+" menu
                                             </Text>
                                             <View style={{ padding: 12, backgroundColor: '#FFF', borderRadius: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 3 }}>
-                                                <QRCode value={getEncodedData() || 'empty'} size={140} color="#111827" backgroundColor="transparent" />
+                                                <QRCode value={getQRPayload() || 'empty'} size={140} color="#111827" backgroundColor="transparent" />
                                             </View>
                                             <TouchableOpacity
                                                 onPress={() => setIsAdding(false)}
@@ -237,10 +261,9 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
                                     )}
                                 </>
                             )}
-                        </GlassView>
-                    </TouchableOpacity>
+                    </GlassView>
                 </TouchableOpacity>
-            </BlurView>
+            </TouchableOpacity>
         </Modal>
     );
 }

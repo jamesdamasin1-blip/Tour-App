@@ -35,10 +35,13 @@ const mapTripToSupabase = (data: any) => ({
     home_currency: data.homeCurrency,
     wallets: data.wallets,
     total_budget_home_cached: data.totalBudgetHomeCached,
+    spontaneous_events: data.spontaneousEvents || [],
     countries: data.countries,
     members: data.members,
+    removed_member_user_ids: data.removedMemberUserIds || [],
     is_completed: data.isCompleted,
     last_modified: data.lastModified,
+    field_updates: data.fieldUpdates,
 });
 
 const mapActivityToSupabase = (data: any) => ({
@@ -53,12 +56,14 @@ const mapActivityToSupabase = (data: any) => ({
     allocated_budget: data.allocatedBudget,
     budget_currency: data.budgetCurrency,
     is_completed: data.isCompleted,
+    is_spontaneous: data.isSpontaneous === true,
     last_modified: data.lastModified,
     description: data.description,
     location: data.location,
     countries: data.countries,
     created_by: data.createdBy,
     last_modified_by: data.lastModifiedBy,
+    field_updates: data.fieldUpdates,
 });
 
 const mapExpenseToSupabase = (data: any) => ({
@@ -78,6 +83,7 @@ const mapExpenseToSupabase = (data: any) => ({
     original_currency: data.originalCurrency,
     created_by: data.createdBy,
     last_modified_by: data.lastModifiedBy,
+    field_updates: data.fieldUpdates,
 });
 
 const mapWalletToSupabase = (data: any) => ({
@@ -89,18 +95,20 @@ const mapWalletToSupabase = (data: any) => ({
     lots: data.lots,
     baseline_exchange_rate: data.baselineExchangeRate,
     default_rate: data.defaultRate,
+    field_updates: data.fieldUpdates,
 });
 
 const mapFundingLotToSupabase = (data: any) => ({
     id: data.id,
     wallet_id: data.walletId,
     trip_id: data.tripId,
-    source_currency: data.sourceCurrency,
+    source_currency: data.sourceCurrency || 'PHP',
     target_currency: data.targetCurrency,
-    source_amount: data.sourceAmount,
+    source_amount: data.homeAmount ?? data.sourceAmount,
     rate: data.rate,
     notes: data.notes,
-    created_at: data.createdAt,
+    created_at: data.date ?? data.createdAt,
+    field_updates: data.fieldUpdates,
 });
 
 /** Map local payload to Supabase-ready columns */
@@ -176,13 +184,20 @@ const pushPendingChanges = async (auth: AuthState): Promise<number> => {
                 if (error) throw error;
             } else {
                 const mapped = mapToSupabase(event.table_name, payload);
-                const { error } = await supabase.from(table).upsert({
+                const upsertPayload: any = {
                     ...mapped,
-                    user_id: auth.userId,
                     updated_by: auth.userId,
                     updated_at: event.timestamp,
+                    last_device_id: auth.deviceId,
                     // Don't send version — let the DB trigger auto-increment it
-                });
+                };
+                
+                // Only explicitely set user_id for newly created rows. Otherwise let Postgres preserve it.
+                if (event.type === 'INSERT') {
+                    upsertPayload.user_id = auth.userId;
+                }
+
+                const { error } = await supabase.from(table).upsert(upsertPayload);
                 if (error) throw error;
             }
 
@@ -244,6 +259,7 @@ const mapTripFromSupabase = (r: any) => ({
     version: Number(r.version || 1),
     updatedBy: r.updated_by || undefined,
     deletedAt: r.deleted_at || null,
+    spontaneousEvents: r.spontaneous_events || [],
 });
 
 const mapActivityFromSupabase = (a: any) => ({
@@ -258,6 +274,7 @@ const mapActivityFromSupabase = (a: any) => ({
     allocatedBudget: Number(a.allocated_budget),
     budgetCurrency: a.budget_currency || 'PHP',
     isCompleted: a.is_completed,
+    isSpontaneous: a.is_spontaneous || false,
     lastModified: Number(a.last_modified),
     description: a.description,
     location: a.location,

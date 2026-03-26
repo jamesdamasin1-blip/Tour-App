@@ -10,6 +10,16 @@ export function usePermissions(tripId: string) {
         const trip = trips.find(t => t.id === tripId);
         const members = trip?.members || [];
 
+        // Solo trip (no members ever added) — current user is always the creator
+        if (members.length === 0) {
+            return {
+                currentMember: null,
+                isCreator: true,
+                canEdit: !trip?.isCompleted,
+                canManageMembers: false,
+            };
+        }
+
         // Find current user's member record
         const currentMember = userId
             ? members.find(m => m.userId === userId) || members.find(m => m.isCreator) || null
@@ -22,7 +32,7 @@ export function usePermissions(tripId: string) {
         // Member-level role (set by creator) for granular control
         const memberLevelViewer = currentMember?.role === 'viewer';
 
-        const canEdit = !tripLevelViewer && !memberLevelViewer;
+        const canEdit = !tripLevelViewer && !memberLevelViewer && !trip?.isCompleted;
         const canManageMembers = isCreator;
 
         return { currentMember, isCreator, canEdit, canManageMembers };

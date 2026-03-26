@@ -26,6 +26,9 @@ import { BottomFade } from '@/components/BottomFade';
 import { ManageMembersModal } from '@/components/ManageBuddiesModal';
 import { usePermissions } from '@/src/hooks/usePermissions';
 
+import { useRealtimeSync } from '@/src/hooks/useRealtimeSync';
+import { useMountEffect } from '@/src/hooks/useMountEffect';
+
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function TripDetailScreen() {
@@ -34,8 +37,10 @@ export default function TripDetailScreen() {
     const activities = useStore(state => state.activities);
     const deleteActivity = useStore(state => state.deleteActivity);
     const toggleActivityCompletion = useStore(state => state.toggleActivityCompletion);
-    const subscribeToTrip = useStore(state => state.subscribeToTrip);
+    const { subscribeToTrip, sendDeleteRequest, sendDeleteRequestCancelled } = useRealtimeSync();
     const { theme, toggleTheme } = useStore();
+    const deletionRequests = useStore(state => state.deletionRequests);
+    const removeDeletionRequest = useStore(state => state.removeDeletionRequest);
     const isDark = theme === 'dark';
     const router = useRouter();
     const insets = useSafeAreaInsets();
@@ -139,21 +144,27 @@ export default function TripDetailScreen() {
             .reduce((sum, a) => sum + (a.expenses || []).reduce((s, e) => s + (e.convertedAmountHome || 0), 0), 0);
     }, [tripActivities]);
 
-    // Total committed = planned budgets + spontaneous actual spending
-    const totalCommittedHome = plannedAllottedHome + spontaneousSpentHome;
+    // Total committed = planned budgets + historical spontaneous accumulation (never decreases)
+    const spontaneousAccumulated = useMemo(() => {
+        const events = trip?.spontaneousEvents || [];
+        return events.reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
+    }, [trip]);
+    const totalCommittedHome = plannedAllottedHome + spontaneousAccumulated;
 
-    // Initial wallet budget only (lot 0 / default lot) in home currency — excludes added funds
+    // Total wallet budget (sum of all funding lots) in home currency
     const totalWalletBudgetHome = useMemo(() => {
         if (!trip?.wallets) return 0;
         return trip.wallets.reduce((sum, wallet) => {
             const lots = (wallet as any).lots || [];
-            const initialLot = lots.find((l: any) => l.isDefault) || lots[0];
-            if (!initialLot) return sum;
-            if (initialLot.sourceCurrency === homeCurrency) {
-                return sum + initialLot.sourceAmount;
-            }
-            const rate = wallet.baselineExchangeRate || wallet.defaultRate || 1;
-            return sum + (initialLot.originalConvertedAmount * rate);
+            return sum + lots.reduce((lSum: number, lot: any) => {
+                const amount = Number(lot.sourceAmount || 0);
+                if (lot.sourceCurrency === homeCurrency) {
+                    return lSum + amount;
+                }
+                const rate = wallet.baselineExchangeRate || wallet.defaultRate || 1;
+                const converted = Number(lot.originalConvertedAmount || 0);
+                return lSum + (converted * rate);
+            }, 0);
         }, 0);
     }, [trip, homeCurrency]);
 
@@ -163,7 +174,7 @@ export default function TripDetailScreen() {
 
     const isOverBudget = totalCommittedHome > totalWalletBudgetHome;
 
-    const { canEdit: isAdmin } = usePermissions(trip?.id || '');
+    const { canEdit: isAdmin, isCreator, currentMember } = usePermissions(trip?.id || '');
 
     // Pagination Logic: Group by date
     const activitiesByDate = useMemo(() => {
@@ -183,13 +194,14 @@ export default function TripDetailScreen() {
         return groups.sort((a, b) => a.date - b.date);
     }, [tripActivities]);
 
-    const currentGroup = activitiesByDate[selectedDateIndex] || null;
+    const safeDateIndex = Math.min(selectedDateIndex, Math.max(0, activitiesByDate.length - 1));
+    const currentGroup = activitiesByDate[safeDateIndex] || null;
 
     // Subscribe to realtime updates — harmless if trip isn't in Supabase yet
-    React.useEffect(() => {
-        const unsubscribe = subscribeToTrip(id);
+    useMountEffect(() => {
+        const unsubscribe = subscribeToTrip(id as string);
         return () => unsubscribe();
-    }, [id]);
+    });
 
     const tripDuration = useMemo(() => {
         if (!trip) return '';
@@ -238,6 +250,35 @@ export default function TripDetailScreen() {
             setDeletingActivity(null);
         }
     }, [deletingActivity, deleteActivity]);
+
+    // Deletion requests for this trip (creator sees these)
+    const tripDeletionRequests = deletionRequests.filter(r => r.tripId === id);
+
+    const handleRequestDelete = useCallback((activity: Activity) => {
+        if (!currentMember) return;
+        const req = {
+            id: `${Date.now()}-${activity.id}`,
+            tripId: id as string,
+            activityId: activity.id,
+            activityTitle: activity.title,
+            requestedByMemberId: currentMember.id,
+            requestedByName: currentMember.name,
+            requestedByColor: currentMember.color,
+            requestedAt: Date.now(),
+        };
+        sendDeleteRequest(req);
+    }, [currentMember, id, sendDeleteRequest]);
+
+    const handleApproveDelete = useCallback((req: typeof tripDeletionRequests[0]) => {
+        deleteActivity(req.activityId);
+        removeDeletionRequest(req.id);
+        sendDeleteRequestCancelled(req.tripId, req.id);
+    }, [deleteActivity, removeDeletionRequest, sendDeleteRequestCancelled]);
+
+    const handleRejectDelete = useCallback((req: typeof tripDeletionRequests[0]) => {
+        removeDeletionRequest(req.id);
+        sendDeleteRequestCancelled(req.tripId, req.id);
+    }, [removeDeletionRequest, sendDeleteRequestCancelled]);
 
     const logSpontaneousExpense = useStore(state => state.logSpontaneousExpense);
 
@@ -346,8 +387,8 @@ export default function TripDetailScreen() {
                                         <Text className={`text-[10px] font-black uppercase tracking-[1.5px] mb-1 ${isDark ? 'text-[#9EB294]' : 'text-[#6B7280]'}`} numberOfLines={1}>
                                             WALLET
                                         </Text>
-                                        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
-                                            style={{ fontSize: 17, fontWeight: '900', color: isDark ? '#B2C4AA' : '#5D6D54' }}>
+                                        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}
+                                            style={{ fontSize: 22, fontWeight: '900', color: isDark ? '#B2C4AA' : '#5D6D54' }}>
                                             {balanceFormatted}
                                         </Text>
                                         {balanceDetail && (
@@ -400,18 +441,18 @@ export default function TripDetailScreen() {
                                             Allotted vs Wallet
                                         </Text>
                                     </View>
-                                    {/* Budget bar with amount inside */}
+                                    {/* Budget bar with text inside */}
                                     <View style={{
                                         height: 20, borderRadius: 10, overflow: 'hidden',
                                         backgroundColor: isDark ? 'rgba(158, 178, 148, 0.08)' : 'rgba(158, 178, 148, 0.15)',
                                     }}>
                                         <View style={{
                                             height: '100%', borderRadius: 10,
-                                            width: `${Math.min((totalCommittedHome / totalWalletBudgetHome) * 100, 100)}%`,
+                                            width: `${totalWalletBudgetHome > 0 ? Math.min((totalCommittedHome / totalWalletBudgetHome) * 100, 100) : 0}%`,
                                             backgroundColor: isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54'),
-                                            justifyContent: 'center',
-                                        }}>
-                                            <Text style={{ fontSize: 8, fontWeight: '900', color: '#fff', paddingHorizontal: 8 }} numberOfLines={1}>
+                                        }} />
+                                        <View style={{ ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' }}>
+                                            <Text style={{ fontSize: 8, fontWeight: '900', color: isDark ? '#F2F0E8' : '#1A1C18', textShadowColor: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)', textShadowRadius: 4, textShadowOffset: { width: 0, height: 0 } }} numberOfLines={1}>
                                                 {budgetDisplayHome
                                                     ? `${MathUtils.formatCurrency(totalCommittedHome, homeCurrency)} / ${MathUtils.formatCurrency(totalWalletBudgetHome, homeCurrency)}`
                                                     : `${MathUtils.formatCurrency(totalCommittedTrip, tripCurrency)} / ${MathUtils.formatCurrency(totalWalletBudgetTrip, tripCurrency)}`
@@ -425,14 +466,48 @@ export default function TripDetailScreen() {
                     </GlassView>
                 </View>
 
+                {/* Deletion request banner — only shown to creator */}
+                {isCreator && tripDeletionRequests.length > 0 && tripDeletionRequests.map(req => (
+                    <View key={req.id} style={{
+                        marginHorizontal: 16, marginBottom: 10, borderRadius: 18,
+                        backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : 'rgba(245,158,11,0.1)',
+                        borderWidth: 1, borderColor: isDark ? 'rgba(245,158,11,0.25)' : 'rgba(245,158,11,0.3)',
+                        padding: 14,
+                    }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: req.requestedByColor, marginRight: 8 }} />
+                            <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: isDark ? '#F5A623' : '#B45309', flex: 1 }}>
+                                {req.requestedByName.toUpperCase()} REQUESTS DELETION
+                            </Text>
+                        </View>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#F2F0E8' : '#111827', marginBottom: 12 }} numberOfLines={1}>
+                            "{req.activityTitle}"
+                        </Text>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TouchableOpacity
+                                onPress={() => handleRejectDelete(req)}
+                                style={{ flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(0,0,0,0.1)' }}
+                            >
+                                <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: isDark ? '#9EB294' : '#6B7280' }}>DENY</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => handleApproveDelete(req)}
+                                style={{ flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: '#ef4444' }}
+                            >
+                                <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: '#fff' }}>APPROVE</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                ))}
+
                 {/* Date navigator */}
                 {activitiesByDate.length > 1 && (
                     <View className="mt-6 mb-2">
                         <View className="flex-row items-center justify-between mb-4 px-4">
                             <TouchableOpacity
                                 onPress={() => setSelectedDateIndex(prev => Math.max(0, prev - 1))}
-                                disabled={selectedDateIndex === 0}
-                                style={{ opacity: selectedDateIndex === 0 ? 0.3 : 1 }}
+                                disabled={safeDateIndex === 0}
+                                style={{ opacity: safeDateIndex === 0 ? 0.3 : 1 }}
                                 className={`w-10 h-10 rounded-full items-center justify-center ${isDark ? 'bg-[#3A3F37]' : 'bg-[#F2F0E8]'}`}
                             >
                                 <Feather name="chevron-left" size={20} color={isDark ? "#B2C4AA" : "#5D6D54"} />
@@ -440,7 +515,7 @@ export default function TripDetailScreen() {
 
                             <View className="items-center">
                                 <Text className={`text-[10px] font-black tracking-[2px] ${isDark ? 'text-[#9EB294]' : 'text-gray-400'}`}>
-                                    DAY {selectedDateIndex + 1} OF {activitiesByDate.length}
+                                    DAY {safeDateIndex + 1} OF {activitiesByDate.length}
                                 </Text>
                                 <Text className={`text-[14px] font-black ${isDark ? 'text-[#F2F0E8]' : 'text-[#5D6D54]'}`}>
                                     {new Date(currentGroup?.date || 0).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}
@@ -449,8 +524,8 @@ export default function TripDetailScreen() {
 
                             <TouchableOpacity
                                 onPress={() => setSelectedDateIndex(prev => Math.min(activitiesByDate.length - 1, prev + 1))}
-                                disabled={selectedDateIndex === activitiesByDate.length - 1}
-                                style={{ opacity: selectedDateIndex === activitiesByDate.length - 1 ? 0.3 : 1 }}
+                                disabled={safeDateIndex === activitiesByDate.length - 1}
+                                style={{ opacity: safeDateIndex === activitiesByDate.length - 1 ? 0.3 : 1 }}
                                 className={`w-10 h-10 rounded-full items-center justify-center ${isDark ? 'bg-[#3A3F37]' : 'bg-[#F2F0E8]'}`}
                             >
                                 <Feather name="chevron-right" size={20} color={isDark ? "#B2C4AA" : "#5D6D54"} />
@@ -465,7 +540,8 @@ export default function TripDetailScreen() {
                     tripTitle={trip?.title}
                     onPress={handlePressActivity}
                     onEdit={isAdmin ? handleEditActivity : undefined}
-                    onDelete={isAdmin ? handleDeleteActivity : undefined}
+                    onDelete={isCreator ? handleDeleteActivity : undefined}
+                    onRequestDelete={(!isCreator && isAdmin) ? handleRequestDelete : undefined}
                     onToggleComplete={isAdmin ? toggleActivityCompletion : undefined}
                 />
             </ScrollView>
@@ -474,13 +550,16 @@ export default function TripDetailScreen() {
 
             {/* Permanent gradient fade above footer so cards don't overlap */}
             <View pointerEvents="none" style={{
-                position: 'absolute', bottom: 64 + insets.bottom, left: 0, right: 0, height: 60, zIndex: 9,
+                position: 'absolute', bottom: 64 + insets.bottom, left: 0, right: 0, height: 140, zIndex: 9,
             }}>
                 <LinearGradient
                     colors={[
                         isDark ? 'rgba(26, 28, 24, 0)' : 'rgba(242, 240, 232, 0)',
+                        isDark ? 'rgba(26, 28, 24, 0.2)' : 'rgba(242, 240, 232, 0.2)',
+                        isDark ? 'rgba(26, 28, 24, 0.6)' : 'rgba(242, 240, 232, 0.6)',
                         isDark ? 'rgba(26, 28, 24, 0.95)' : 'rgba(242, 240, 232, 0.95)',
                     ]}
+                    locations={[0, 0.4, 0.75, 1]}
                     style={{ flex: 1 }}
                 />
             </View>

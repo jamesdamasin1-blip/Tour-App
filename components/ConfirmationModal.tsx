@@ -3,6 +3,7 @@ import React from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useStore } from '../src/store/useStore';
+import { GlassView } from './GlassView';
 
 
 interface ConfirmationModalProps {
@@ -47,16 +48,12 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             <View style={styles.overlay}>
                 <BlurView intensity={30} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
-                <View
-                    style={[
-                        styles.modalContainer,
-                        {
-                            backgroundColor: isDark ? '#282C26' : '#F2F0E4',
-                            borderRadius: 32,
-                            borderWidth: 1,
-                            borderColor: isDark ? 'rgba(158, 178, 148, 0.1)' : 'rgba(255, 255, 255, 0.4)',
-                        }
-                    ]}
+                <GlassView
+                    intensity={isDark ? 80 : 100}
+                    borderRadius={32}
+                    backgroundColor={isDark ? 'rgba(30, 34, 28, 0.97)' : 'rgba(255, 255, 255, 0.98)'}
+                    borderColor={isDark ? 'rgba(158,178,148,0.2)' : 'rgba(93,109,84,0.15)'}
+                    style={styles.modalContainer}
                 >
                     <View style={styles.content}>
                         <Text style={[styles.title, isDark && { color: '#F2F0E8' }]}>{title}</Text>
@@ -79,7 +76,7 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                             </TouchableOpacity>
                         </View>
                     </View>
-                </View>
+                </GlassView>
             </View>
         </Modal>
     );

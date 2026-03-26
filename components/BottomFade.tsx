@@ -27,17 +27,19 @@ export const BottomFade: React.FC<BottomFadeProps> = ({ visible }) => {
                 bottom: 0,
                 left: 0,
                 right: 0,
-                height: 200 + insets.bottom,
+                height: 260 + insets.bottom,
                 zIndex: 5,
             }}
         >
             <LinearGradient
                 colors={[
                     isDark ? 'rgba(26, 28, 24, 0)' : 'rgba(242, 240, 232, 0)',
-                    isDark ? 'rgba(26, 28, 24, 0.4)' : 'rgba(242, 240, 232, 0.4)',
-                    isDark ? 'rgba(26, 28, 24, 0.8)' : 'rgba(242, 240, 232, 0.8)',
-                    isDark ? 'rgba(26, 28, 24, 1)' : 'rgba(242, 240, 232, 1)'
+                    isDark ? 'rgba(26, 28, 24, 0.15)' : 'rgba(242, 240, 232, 0.15)',
+                    isDark ? 'rgba(26, 28, 24, 0.55)' : 'rgba(242, 240, 232, 0.55)',
+                    isDark ? 'rgba(26, 28, 24, 0.92)' : 'rgba(242, 240, 232, 0.92)',
+                    isDark ? 'rgba(26, 28, 24, 1)' : 'rgba(242, 240, 232, 1)',
                 ]}
+                locations={[0, 0.25, 0.55, 0.82, 1]}
                 style={{ flex: 1 }}
             />
         </View>

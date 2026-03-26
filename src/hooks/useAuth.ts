@@ -189,6 +189,7 @@ export const useAuth = () => {
         // Listen for auth changes (includes TOKEN_REFRESHED events from Supabase)
         const unsubscribe = onAuthStateChange((state) => {
             setAuth(state);
+            useStore.getState().setCurrentUserId(state.userId ?? null);
             if (state.isAuthenticated && state.userId) {
                 linkLocalDataToUser(state.userId);
                 startSyncLoop();

@@ -72,15 +72,12 @@ export function ActivitySummaryModal({
                 
                 <View style={{ width: '100%', maxWidth: 440, paddingHorizontal: 16 }}>
                     <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
-                    <View
-                        style={{ 
-                            width: '100%', 
-                            overflow: 'hidden',
-                            backgroundColor: isDark ? '#282C26' : '#F2F0E4',
-                            borderRadius: 40,
-                            borderWidth: 1,
-                            borderColor: isDark ? 'rgba(158, 178, 148, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-                        }}
+                    <GlassView
+                        intensity={isDark ? 80 : 100}
+                        borderRadius={40}
+                        backgroundColor={isDark ? 'rgba(30, 34, 28, 0.97)' : 'rgba(255, 255, 255, 0.98)'}
+                        borderColor={isDark ? 'rgba(158,178,148,0.2)' : 'rgba(93,109,84,0.15)'}
+                        style={{ width: '100%', overflow: 'hidden' }}
                     >
                         <Animated.View style={{ width: pageWidth * 2, flexDirection: 'row', transform: [{ translateX: slideAnim }] }}>
                             {/* PAGE 1 */}
@@ -180,7 +177,7 @@ export function ActivitySummaryModal({
                                 <Feather name="chevron-left" size={20} color="#5D6D54" />
                             </TouchableOpacity>
                         )}
-                    </View>
+                    </GlassView>
                     </TouchableOpacity>
                 </View>
             </TouchableOpacity>

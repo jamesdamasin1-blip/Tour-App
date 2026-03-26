@@ -6,7 +6,12 @@ export const applyExpenseFIFO = (
     wallet: CompactWallet,
     expenseAmount: number // in walletCurrency
 ): { updatedWallet: CompactWallet; breakdown: LotDeduction[] } => {
-    
+
+    // Guard: Expense amount must be positive
+    if (expenseAmount <= 0) {
+        throw new Error(`FIFO requires a positive expense amount (got ${expenseAmount})`);
+    }
+
     // Guard: Prevent expenses exceeding available lot sums
     assertExpenseInvariant(wallet, expenseAmount);
 

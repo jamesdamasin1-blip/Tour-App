@@ -23,6 +23,7 @@ interface ActivityListItemProps {
     activity: Activity;
     onPress?: (activity: Activity) => void;
     onDelete?: (activity: Activity) => void;
+    onRequestDelete?: (activity: Activity) => void;
     onEdit?: (activity: Activity) => void;
     onToggleComplete?: () => void;
 }
@@ -36,6 +37,7 @@ export const ActivityListItem = React.memo(({
     activity,
     onPress,
     onDelete,
+    onRequestDelete,
     onEdit,
     onToggleComplete,
 }: ActivityListItemProps) => {
@@ -51,11 +53,16 @@ export const ActivityListItem = React.memo(({
     // Member color indicator — only show when trip has members
     const authorMember = useMemo(() => {
         const members = trip?.members;
-        if (!members || members.length === 0) return null;
+        // ONLY WHEN a member is added (creator + at least 1 other = length > 1)
+        if (!members || members.length <= 1) return null;
+        
         const authorId = activity.lastModifiedBy || activity.createdBy;
         if (!authorId) return null;
-        return members.find(m => m.id === authorId) || null;
-    }, [trip?.members, activity.lastModifiedBy, activity.createdBy]);
+        
+        let member = members.find(m => m.id === authorId);
+        if (!member) member = members.find(m => m.userId === authorId);
+        return member || null;
+    }, [trip, activity.lastModifiedBy, activity.createdBy]);
     const memberColor = authorMember?.color || null;
 
     // Find the specific wallet linked to this activity to get its baseline exchange rate
@@ -75,9 +82,11 @@ export const ActivityListItem = React.memo(({
         return budget * walletRate;
     }, [activity.allocatedBudget, activity.budgetCurrency, homeCurrency, walletRate]);
     
-    const spendPercentage = allocatedBudgetHome > 0
+    const spendPercentage = allocatedBudgetHome > 0 && Number.isFinite(totalSpentHome) && Number.isFinite(allocatedBudgetHome)
         ? Math.round((totalSpentHome / allocatedBudgetHome) * 100)
         : 0;
+        
+    const safeSpendPercentage = Math.min(Math.max(spendPercentage || 0, 0), 100);
 
     const varianceHome = Math.abs(allocatedBudgetHome - totalSpentHome);
     const isOverBudget = totalSpentHome > allocatedBudgetHome;
@@ -92,7 +101,11 @@ export const ActivityListItem = React.memo(({
     const hapticFiredLeft = useSharedValue(false);
 
     const triggerHaptic = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const triggerDelete = () => onDelete?.(activity);
+    const isRequestMode = !onDelete && !!onRequestDelete;
+    const triggerDelete = () => {
+        if (onDelete) onDelete(activity);
+        else onRequestDelete?.(activity);
+    };
     const triggerEdit = () => onEdit?.(activity);
 
     const pan = Gesture.Pan()
@@ -188,16 +201,20 @@ export const ActivityListItem = React.memo(({
                                 }} />
                             )}
 
-                            {/* Delete gradient tint */}
+                            {/* Delete / Request-delete gradient tint */}
                             <Animated.View style={[StyleSheet.absoluteFillObject, styles.overlayRadius, deleteOverlayStyle]} pointerEvents="none">
                                 <LinearGradient
-                                    colors={['transparent', 'rgba(239, 68, 68, 0.5)']}
+                                    colors={isRequestMode ? ['transparent', 'rgba(245,158,11,0.5)'] : ['transparent', 'rgba(239,68,68,0.5)']}
                                     start={{ x: 0.2, y: 0.5 }}
                                     end={{ x: 1, y: 0.5 }}
                                     style={StyleSheet.absoluteFill}
                                 />
                                 <Animated.View style={[styles.edgeIcon, styles.edgeIconRight, deleteIconStyle]}>
-                                    <Feather name="trash-2" size={22} color="rgba(200,40,40,0.95)" />
+                                    <Feather
+                                        name={isRequestMode ? 'send' : 'trash-2'}
+                                        size={22}
+                                        color={isRequestMode ? 'rgba(180,110,0,0.95)' : 'rgba(200,40,40,0.95)'}
+                                    />
                                 </Animated.View>
                             </Animated.View>
 
@@ -285,7 +302,7 @@ export const ActivityListItem = React.memo(({
                                         marginTop: 4
                                     }}>
                                         <ProgressBar
-                                            progress={activity.isSpontaneous ? 100 : Math.min(spendPercentage, 100)}
+                                            progress={activity.isSpontaneous ? 100 : safeSpendPercentage}
                                             color={isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54')}
                                             trackColor="transparent"
                                             height={24}
@@ -293,7 +310,7 @@ export const ActivityListItem = React.memo(({
                                             floatingLabel={
                                                 activity.isSpontaneous
                                                     ? MathUtils.formatCurrency(totalSpentHome, homeCurrency)
-                                                    : `${MathUtils.formatCurrency(totalSpentHome, homeCurrency)} / ${MathUtils.formatCurrency(allocatedBudgetHome, homeCurrency)} (${spendPercentage}%)`
+                                                    : `${MathUtils.formatCurrency(totalSpentHome, homeCurrency)} / ${MathUtils.formatCurrency(allocatedBudgetHome, homeCurrency)} (${safeSpendPercentage}%)`
                                             }
                                         />
                                     </View>

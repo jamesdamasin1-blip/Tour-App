@@ -25,6 +25,25 @@ export const offlineSync = {
     walletUpdate: (id: string, data: any) => { try { syncWalletUpdate(id, data); } catch (e) { console.error('[Persist] walletUpdate:', e); } },
 };
 
+/** 
+ * Automatically generates a fieldUpdates map for CRDT-lite architectures 
+ * based on the keys present in a patch object.
+ */
+export const stampFieldUpdates = (
+    existingUpdates: Record<string, number> | undefined,
+    patch: Record<string, any>,
+    timestamp: number = Date.now(),
+    exclude: string[] = []
+): Record<string, number> => {
+    const next = { ...(existingUpdates || {}) };
+    for (const key of Object.keys(patch)) {
+        if (!exclude.includes(key) && patch[key] !== undefined) {
+            next[key] = timestamp;
+        }
+    }
+    return next;
+};
+
 /** Reverse FIFO: restore lot balances from an expense's lotBreakdown */
 export const reverseFIFO = (wallet: Wallet, expense: Expense): Wallet['lots'] => {
     if (!expense.lotBreakdown?.length) return wallet.lots || [];

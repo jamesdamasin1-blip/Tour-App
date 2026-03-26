@@ -9,6 +9,7 @@ import { CurrencyUtils } from '@/src/utils/currencyUtils';
 import { Platform } from 'react-native';
 import { initializeDB } from '@/src/storage/localDB';
 import { useNetworkStatus } from '@/src/hooks/useNetworkStatus';
+import { WalletErrorModal } from '@/components/WalletErrorModal';
 
 import '../global.css';
 
@@ -66,6 +67,7 @@ export default function RootLayout() {
           <Stack.Screen name="auth/callback" options={{ headerShown: false, animation: 'none' }} />
           <Stack.Screen name="+not-found" options={{ title: 'Oops!' }} />
         </Stack>
+        <WalletErrorModal />
       </ThemeProvider>
     </GestureHandlerRootView>
   );
