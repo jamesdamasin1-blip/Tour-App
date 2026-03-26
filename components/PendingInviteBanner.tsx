@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Alert, AppState } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useStore } from '@/src/store/useStore';
 import { useAuth } from '@/src/hooks/useAuth';
@@ -19,7 +19,16 @@ export const PendingInviteBanner = () => {
         const unsubscribe = inviteService.subscribeToInvites(email, (invite) => {
             addRealtimeInvite(invite);
         });
-        return unsubscribe;
+
+        // Re-fetch when app comes back to the foreground
+        const appStateSub = AppState.addEventListener('change', (state) => {
+            if (state === 'active') loadReceivedInvites(email);
+        });
+
+        return () => {
+            unsubscribe();
+            appStateSub.remove();
+        };
     }, [isAuthenticated, email]);
 
     const pendingInvites = invites.filter(i => i.status === 'pending');

@@ -294,7 +294,7 @@ export const ExchangeHistoryModal = ({ tripId, visible, onClose }: ExchangeHisto
                                                                     </Text>
                                                                 )}
                                                             </View>
-                                                            <Text className="text-[9px] font-bold opacity-40">
+                                                            <Text style={{ fontSize: 12, fontWeight: '700', color: accentColor, opacity: 0.6 }}>
                                                                 Bal: {MathUtils.formatCurrency(balanceAfterHome, homeCurrency)}
                                                             </Text>
                                                         </View>
@@ -380,7 +380,7 @@ export const ExchangeHistoryModal = ({ tripId, visible, onClose }: ExchangeHisto
                                                             alignItems: 'center',
                                                             gap: 6,
                                                         }}>
-                                                            <Text style={{ fontSize: 10, fontWeight: '700', color: isDark ? '#aaa' : '#888' }}>
+                                                            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#aaa' : '#888' }}>
                                                                 Bal: {MathUtils.formatCurrency(balanceAfterHome, homeCurrency)}
                                                             </Text>
                                                             {balanceInWallet !== null && (

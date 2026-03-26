@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal, View, Text, TouchableOpacity, TextInput, FlatList, Share, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -8,6 +8,7 @@ import { TripMember } from '@/src/types/models';
 import { usePermissions } from '@/src/hooks/usePermissions';
 import QRCode from 'react-native-qrcode-svg';
 import { base64Encode } from '@/src/utils/base64';
+import { runSync } from '@/src/sync/syncEngine';
 
 interface ManageMembersModalProps {
     tripId: string;
@@ -27,6 +28,15 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
 
     const [isAdding, setIsAdding] = useState<false | 'qr' | 'code'>(false);
     const [removingId, setRemovingId] = useState<string | null>(null);
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    // Pull latest members from server whenever modal opens
+    useEffect(() => {
+        if (visible) {
+            setIsSyncing(true);
+            runSync().finally(() => setIsSyncing(false));
+        }
+    }, [visible]);
 
     const getEncodedData = () => {
         if (!trip) return '';
@@ -101,9 +111,14 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
                             style={{ width: 320, padding: 28 }}
                         >
                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                                <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#F2F0E8' : '#111827', letterSpacing: 1 }}>
-                                    MEMBERS
-                                </Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#F2F0E8' : '#111827', letterSpacing: 1 }}>
+                                        MEMBERS
+                                    </Text>
+                                    {isSyncing && (
+                                        <Feather name="refresh-cw" size={12} color={isDark ? '#9EB294' : '#6B7280'} />
+                                    )}
+                                </View>
                                 <TouchableOpacity onPress={handleClose} style={{ padding: 4 }}>
                                     <Feather name="x" size={20} color={isDark ? '#9EB294' : '#6B7280'} />
                                 </TouchableOpacity>

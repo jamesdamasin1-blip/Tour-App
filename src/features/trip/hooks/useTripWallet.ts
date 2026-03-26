@@ -34,7 +34,12 @@ export const useTripWallet = (tripId: string) => {
                 balance,
                 effectiveRate: lockedRate,  // locked rate from trip creation, never live
                 defaultRate: wallet.defaultRate,
-                homeEquivalent: balance * lockedRate    // [F9] remaining balance in home currency, not total funded
+                // Compute home equivalent per-lot at each lot's own locked rate.
+                // Using a single lockedRate for all lots is wrong when multiple deposits
+                // were made at different exchange rates — leftover MYR from lot 1 would be
+                // re-priced at lot 2's rate, causing small but visible discrepancies.
+                homeEquivalent: lots.reduce((sum: number, lot: any) =>
+                    sum + (lot.remainingAmount || 0) * (lot.lockedRate || lockedRate), 0)
             };
         });
     }, [trip, homeCurrency]);

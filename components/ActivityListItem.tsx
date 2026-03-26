@@ -50,18 +50,24 @@ export const ActivityListItem = React.memo(({
     const trip = useMemo(() => trips.find(t => t.id === activity.tripId), [trips, activity.tripId]);
     const homeCurrency = trip?.homeCurrency || trip?.currency || 'PHP';
 
-    // Member color indicator — only show when trip has members
+    // Member color indicator — show when trip is collaborative
     const authorMember = useMemo(() => {
         const members = trip?.members;
-        // ONLY WHEN a member is added (creator + at least 1 other = length > 1)
-        if (!members || members.length <= 1) return null;
-        
+        if (!members || members.length === 0) return null;
+
         const authorId = activity.lastModifiedBy || activity.createdBy;
         if (!authorId) return null;
-        
+
         let member = members.find(m => m.id === authorId);
         if (!member) member = members.find(m => m.userId === authorId);
-        return member || null;
+        if (!member) return null;
+
+        // Only show indicator when trip is collaborative:
+        // either cloud-synced (has remote members) or has multiple local members
+        const isCollaborative = trip?.isCloudSynced || members.length > 1;
+        if (!isCollaborative) return null;
+
+        return member;
     }, [trip, activity.lastModifiedBy, activity.createdBy]);
     const memberColor = authorMember?.color || null;
 
@@ -110,6 +116,7 @@ export const ActivityListItem = React.memo(({
 
     const pan = Gesture.Pan()
         .activeOffsetX([-8, 8])
+        .failOffsetY([-10, 10])
         .onUpdate((e) => {
             const clamped = Math.max(-MAX_SWIPE_RIGHT, Math.min(activity.isCompleted ? 0 : MAX_SWIPE_LEFT, e.translationX));
             translateX.value = clamped;

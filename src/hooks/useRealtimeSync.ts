@@ -239,9 +239,10 @@ function applyActivityChange(payload: any) {
             };
         }
 
-        // New activity from remote
+        // New activity from remote — seed with any expenses that arrived before the activity did
+        const seededExpenses = (s.expenses || []).filter(e => e.activityId === incoming.id);
         return {
-            activities: [...(s.activities || []), { ...incoming, expenses: [] } as Activity],
+            activities: [...(s.activities || []), { ...incoming, expenses: seededExpenses } as Activity],
         };
     });
 

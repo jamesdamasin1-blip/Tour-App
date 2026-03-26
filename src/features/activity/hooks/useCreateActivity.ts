@@ -178,21 +178,14 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
 
                 const diff = numericActualCost - currentSpent;
                 if (diff > 0.01) {
-                    // Only create an adjustment expense when adding MORE cost.
-                    // Negative diffs (reducing cost) cannot be expressed as an expense
-                    // in the FIFO system — the user must delete individual expenses instead.
-
-                    // Convert diff to wallet (trip) currency and home currency
+                    // User increased cost: add an adjustment expense for the difference.
                     // effectiveRate = home per wallet (e.g. 1 MYR = 15.3 PHP → rate=15.3)
-                    // fromHome: homeAmount / rate  |  toHome: tripAmount * rate
                     let amountInTrip = diff;
                     let amountInHome = diff;
                     if (actualCurrency === homeCurrency) {
-                        // diff is in home currency → convert to wallet currency
                         amountInTrip = diff / (effectiveRate || 1);
                         amountInHome = diff;
                     } else {
-                        // diff is in wallet/trip currency → convert to home
                         amountInTrip = diff;
                         amountInHome = diff * (effectiveRate || 1);
                     }
@@ -214,6 +207,36 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
                         originalCurrency: actualCurrency,
                         createdBy: currentMemberId || undefined,
                     });
+                } else if (diff < -0.01) {
+                    // User reduced cost: replace ALL existing expenses with a single new one
+                    // at the specified amount. The FIFO reversal happens inside updateActivity.
+                    let amountInTrip: number;
+                    let amountInHome: number;
+                    if (actualCurrency === homeCurrency) {
+                        amountInHome = numericActualCost;
+                        amountInTrip = numericActualCost / (effectiveRate || 1);
+                    } else {
+                        amountInTrip = numericActualCost;
+                        amountInHome = numericActualCost * (effectiveRate || 1);
+                    }
+
+                    finalExpenses = [{
+                        id: MathUtils.generateId(),
+                        tripId,
+                        walletId: walletId || '',
+                        activityId: activityId || '',
+                        name: editingActivity?.title || 'Manual Entry',
+                        category: (editingActivity?.category as any) || 'Other',
+                        amount: amountInTrip,
+                        currency: activeWallet?.currency || tripCurrency,
+                        convertedAmountHome: amountInHome,
+                        convertedAmountTrip: amountInTrip,
+                        date: Date.now(),
+                        time: Date.now(),
+                        originalAmount: numericActualCost,
+                        originalCurrency: actualCurrency,
+                        createdBy: currentMemberId || undefined,
+                    }];
                 }
             }
             activityData.expenses = finalExpenses;

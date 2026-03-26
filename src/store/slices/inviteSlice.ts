@@ -42,6 +42,26 @@ export const createInviteSlice: StateCreator<AppState, [], [], InviteSlice> = (s
         if (trip) {
             const { supabase } = await import('../storeHelpers');
 
+            // Ensure the creator always has a member record with isCreator: true.
+            // Without this, after an invite is accepted and the trip syncs from the server,
+            // usePermissions can't identify the creator (members only contains invited users).
+            const { BUDDY_COLORS } = await import('../../types/models');
+            const { generateId } = await import('../../utils/mathUtils');
+            let membersToSync = [...(trip.members || [])];
+            const hasCreatorEntry = membersToSync.some(m => m.isCreator === true);
+            if (!hasCreatorEntry) {
+                membersToSync = [{
+                    id: generateId(),
+                    name: params.fromDisplayName || 'Creator',
+                    color: BUDDY_COLORS[0],
+                    isCreator: true as const,
+                    userId: params.fromUserId,
+                    email: params.fromEmail || undefined,
+                    role: 'editor' as const,
+                    addedAt: Date.now(),
+                }, ...membersToSync];
+            }
+
             // Push trip directly
             const { error: tripErr } = await supabase.from('trips').upsert({
                 id: trip.id,
@@ -54,7 +74,7 @@ export const createInviteSlice: StateCreator<AppState, [], [], InviteSlice> = (s
                 wallets: trip.wallets,
                 total_budget_home_cached: trip.totalBudgetHomeCached,
                 countries: trip.countries,
-                members: trip.members,
+                members: membersToSync,
                 is_completed: trip.isCompleted,
                 last_modified: trip.lastModified,
                 user_id: params.fromUserId,

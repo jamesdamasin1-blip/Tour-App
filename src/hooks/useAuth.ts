@@ -73,8 +73,16 @@ export const useAuth = () => {
                             const remoteVersion = remote.version ?? 0;
 
                             if (remoteVersion > localVersion) {
-                                // Remote is newer — full replace, keep isCloudSynced
-                                updated[idx] = { ...local, ...remote };
+                                // Remote is newer — full replace, keep isCloudSynced.
+                                // Preserve local wallet lots: trips.wallets JSONB is stale with
+                                // respect to FIFO spending — lot.remainingAmount is only accurate
+                                // locally (updated by applyExpenseFIFO). The wallets table
+                                // (synced separately via realtime) carries the authoritative lots.
+                                const mergedWallets = (remote.wallets || []).map((rw: any) => {
+                                    const lw = (local.wallets || []).find((w: any) => w.id === rw.id);
+                                    return lw ? { ...rw, lots: lw.lots } : rw;
+                                });
+                                updated[idx] = { ...local, ...remote, wallets: mergedWallets };
                             }
                             // Local is newer or equal — keep local as-is (members are
                             // now pushed via syncEngine, so version-based merge handles them)
@@ -169,7 +177,85 @@ export const useAuth = () => {
                     }
 
                     const kept = s.expenses.filter(e => !memberTripIds.includes(e.tripId));
-                    return { expenses: [...kept, ...merged] };
+                    const allExpenses = [...kept, ...merged];
+
+                    // Embed expenses back into their activities so progress bars reflect latest state.
+                    const updatedActivities = s.activities.map(a => {
+                        if (!memberTripIds.includes(a.tripId)) return a;
+                        return { ...a, expenses: allExpenses.filter(e => e.activityId === a.id) };
+                    });
+
+                    // Apply FIFO for genuinely new expenses so wallet balances update correctly.
+                    // Only apply expenses that were NOT already in local state (to avoid double-deduction).
+                    const brandNewExpenses = merged.filter(e => !localMap.has(e.id));
+                    let updatedTrips = s.trips;
+                    if (brandNewExpenses.length > 0) {
+                        const { applyExpenseFIFO } = require('../finance/expense/expenseEngine');
+                        updatedTrips = s.trips.map(t => {
+                            if (!memberTripIds.includes(t.id)) return t;
+                            const tripNew = brandNewExpenses.filter(e => e.tripId === t.id);
+                            if (!tripNew.length) return t;
+
+                            const updatedWallets = (t.wallets || []).map((w: any) => {
+                                const walletNew = tripNew.filter(e => e.walletId === w.id);
+                                let lots = w.lots || [];
+                                for (const exp of walletNew) {
+                                    const amount = Number(exp.convertedAmountTrip || exp.amount || 0);
+                                    if (amount > 0) {
+                                        try {
+                                            const result = applyExpenseFIFO({ ...w, lots } as any, amount);
+                                            lots = result.updatedWallet.lots;
+                                        } catch {
+                                            // Wallet may be overdrawn on member side — skip FIFO silently
+                                        }
+                                    }
+                                }
+                                return { ...w, lots };
+                            });
+                            return { ...t, wallets: updatedWallets };
+                        });
+                    }
+
+                    // Re-apply FIFO for expenses whose amount changed: reverse old deduction, apply new.
+                    const amountChangedExpenses = merged.filter(e => {
+                        const local = localMap.get(e.id);
+                        return local &&
+                            (e.version ?? 0) > (local.version ?? 0) &&
+                            Number(local.convertedAmountTrip) !== Number(e.convertedAmountTrip);
+                    });
+                    if (amountChangedExpenses.length > 0) {
+                        const { reverseFIFO } = require('../store/storeHelpers');
+                        const { applyExpenseFIFO } = require('../finance/expense/expenseEngine');
+                        updatedTrips = updatedTrips.map((t: any) => {
+                            if (!memberTripIds.includes(t.id)) return t;
+                            const tripChanged = amountChangedExpenses.filter((e: any) => e.tripId === t.id);
+                            if (!tripChanged.length) return t;
+                            const updatedWallets = (t.wallets || []).map((w: any) => {
+                                const walletChanged = tripChanged.filter((e: any) => e.walletId === w.id);
+                                if (!walletChanged.length) return w;
+                                let lots = w.lots || [];
+                                for (const exp of walletChanged) {
+                                    const oldExp = localMap.get(exp.id);
+                                    if (oldExp) {
+                                        lots = reverseFIFO({ ...w, lots } as any, oldExp);
+                                    }
+                                    const amount = Number(exp.convertedAmountTrip || 0);
+                                    if (amount > 0) {
+                                        try {
+                                            const result = applyExpenseFIFO({ ...w, lots } as any, amount);
+                                            lots = result.updatedWallet.lots;
+                                        } catch {
+                                            // wallet may be overdrawn — skip
+                                        }
+                                    }
+                                }
+                                return { ...w, lots };
+                            });
+                            return { ...t, wallets: updatedWallets };
+                        });
+                    }
+
+                    return { expenses: allExpenses, activities: updatedActivities, trips: updatedTrips };
                 });
             }
         });

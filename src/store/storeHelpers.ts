@@ -44,19 +44,40 @@ export const stampFieldUpdates = (
     return next;
 };
 
-/** Reverse FIFO: restore lot balances from an expense's lotBreakdown */
+/** Reverse FIFO: restore lot balances from an expense's lotBreakdown.
+ *  Falls back to LIFO restoration (newest lot first) when lotBreakdown is absent —
+ *  this happens for expenses pulled from the server which don't carry lotBreakdown. */
 export const reverseFIFO = (wallet: Wallet, expense: Expense): Wallet['lots'] => {
-    if (!expense.lotBreakdown?.length) return wallet.lots || [];
+    const lots = wallet.lots || [];
 
-    const breakdownMap = new Map(expense.lotBreakdown.map(b => [b.lotId, b.amount]));
-    return (wallet.lots || []).map(lot => {
-        const restore = breakdownMap.get(lot.id);
-        if (!restore) return lot;
-        return {
-            ...lot,
-            remainingAmount: Number((lot.remainingAmount + restore).toFixed(4)),
-        };
-    });
+    if (expense.lotBreakdown?.length) {
+        const breakdownMap = new Map(expense.lotBreakdown.map(b => [b.lotId, b.amount]));
+        return lots.map(lot => {
+            const restore = breakdownMap.get(lot.id);
+            if (!restore) return lot;
+            return {
+                ...lot,
+                remainingAmount: Number((lot.remainingAmount + restore).toFixed(4)),
+            };
+        });
+    }
+
+    // Fallback: no lotBreakdown — restore by adding back to lots LIFO (newest first).
+    // This is exact for single-lot wallets and approximate for multi-lot wallets.
+    let remaining = expense.convertedAmountTrip || 0;
+    if (remaining <= 0) return lots;
+
+    const restored = [...lots];
+    for (let i = restored.length - 1; i >= 0 && remaining > 0; i--) {
+        const lot = restored[i];
+        // How much was spent from this lot = original - remaining (always >= 0)
+        const spent = Math.max(0, (lot.originalConvertedAmount ?? 0) - lot.remainingAmount);
+        if (spent <= 0) continue; // nothing was spent from this lot, skip
+        const add = Math.min(remaining, spent);
+        restored[i] = { ...lot, remainingAmount: Number((lot.remainingAmount + add).toFixed(4)) };
+        remaining = Number((remaining - add).toFixed(4));
+    }
+    return restored;
 };
 
 /** Recompute spentAmount from the expense ledger — O(n+m) via pre-indexed map */

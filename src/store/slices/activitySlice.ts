@@ -89,47 +89,55 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
                   ]
                 : state.expenses;
 
+            // Compute updated wallets with FIFO before the return so we can also sync them.
+            const updatedTrips = state.trips.map(t => {
+                if (t.id !== activity.tripId) return t;
+                if (!activityData.expenses) return { ...t, lastModified };
+
+                let wallets = t.wallets.map((w): Wallet => {
+                    const oldExpenses = state.expenses.filter(
+                        e => e.activityId === id && e.walletId === w.id
+                    );
+                    let lots = w.lots || [];
+                    for (const exp of oldExpenses) {
+                        lots = reverseFIFO({ ...w, lots } as Wallet, exp);
+                    }
+
+                    const newExpenses = finalExpenses.filter(
+                        (e: any) => e.walletId === w.id
+                    );
+                    for (const exp of newExpenses) {
+                        const amount = exp.convertedAmountTrip || 0;
+                        if (amount > 0) {
+                            try {
+                                const fifoResult = applyExpenseFIFO(
+                                    { ...w, lots } as any, amount
+                                );
+                                lots = fifoResult.updatedWallet.lots;
+                                exp.lotBreakdown = fifoResult.breakdown;
+                            } catch (e) {
+                                console.error('[updateActivity] FIFO re-apply failed:', e);
+                            }
+                        }
+                    }
+
+                    return { ...w, lots };
+                });
+
+                wallets = recomputeWalletSpent(wallets, updatedExpenses);
+
+                // Sync updated wallet state so collaborators receive FIFO-updated lots via realtime.
+                if (activityData.expenses) {
+                    wallets.forEach(w => offlineSync.walletUpdate(w.id, w));
+                }
+
+                return { ...t, lastModified, wallets };
+            });
+
             return {
                 activities: state.activities.map(a => a.id === id ? updated : a),
                 expenses: updatedExpenses,
-                trips: state.trips.map(t => {
-                    if (t.id !== activity.tripId) return t;
-                    if (!activityData.expenses) return { ...t, lastModified };
-
-                    let wallets = t.wallets.map((w): Wallet => {
-                        const oldExpenses = state.expenses.filter(
-                            e => e.activityId === id && e.walletId === w.id
-                        );
-                        let lots = w.lots || [];
-                        for (const exp of oldExpenses) {
-                            lots = reverseFIFO({ ...w, lots } as Wallet, exp);
-                        }
-
-                        const newExpenses = finalExpenses.filter(
-                            (e: any) => e.walletId === w.id
-                        );
-                        for (const exp of newExpenses) {
-                            const amount = exp.convertedAmountTrip || 0;
-                            if (amount > 0) {
-                                try {
-                                    const fifoResult = applyExpenseFIFO(
-                                        { ...w, lots } as any, amount
-                                    );
-                                    lots = fifoResult.updatedWallet.lots;
-                                    exp.lotBreakdown = fifoResult.breakdown;
-                                } catch (e) {
-                                    console.error('[updateActivity] FIFO re-apply failed:', e);
-                                }
-                            }
-                        }
-
-                        return { ...w, lots };
-                    });
-
-                    wallets = recomputeWalletSpent(wallets, updatedExpenses);
-
-                    return { ...t, lastModified, wallets };
-                })
+                trips: updatedTrips,
             };
         }),
 
@@ -140,19 +148,42 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
 
             const lastModified = Date.now();
 
-            const activityExpenses = state.expenses.filter(e => e.activityId === id);
-            const hasActualCosts = activityExpenses.length > 0;
-
             offlineSync.activityDelete(id);
+
+            // Completed activities: money is already permanently spent.
+            // Remove the activity record but keep expenses in state so
+            // wallet spentAmount and lot balances stay unchanged.
+            if (activity.isCompleted) {
+                return {
+                    activities: state.activities.filter(a => a.id !== id),
+                    trips: state.trips.map(t =>
+                        t.id === activity.tripId ? { ...t, lastModified } : t
+                    ),
+                };
+            }
+
+            // Incomplete activities: restore wallet balance by reversing FIFO.
+            const activityExpenses = state.expenses.filter(e => e.activityId === id);
+            activityExpenses.forEach(e => offlineSync.expenseDelete(e.id));
+
+            const updatedTrips = state.trips.map(t => {
+                if (t.id !== activity.tripId) return t;
+                const wallets = t.wallets.map((w): Wallet => {
+                    const walletExpenses = activityExpenses.filter(e => e.walletId === w.id);
+                    if (!walletExpenses.length) return w;
+                    let lots = w.lots || [];
+                    for (const exp of walletExpenses) {
+                        lots = reverseFIFO({ ...w, lots } as Wallet, exp);
+                    }
+                    return { ...w, lots };
+                });
+                return { ...t, lastModified, wallets };
+            });
 
             return {
                 activities: state.activities.filter(a => a.id !== id),
-                expenses: hasActualCosts
-                    ? state.expenses.map(e =>
-                        e.activityId === id ? { ...e, activityId: undefined } : e
-                      )
-                    : state.expenses.filter(e => e.activityId !== id),
-                trips: state.trips.map(t => t.id === activity.tripId ? { ...t, lastModified } : t)
+                expenses: state.expenses.filter(e => e.activityId !== id),
+                trips: updatedTrips,
             };
         }),
 

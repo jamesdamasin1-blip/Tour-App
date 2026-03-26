@@ -53,6 +53,7 @@ export default function TripDetailScreen() {
     const [isExchangeHistoryVisible, setIsExchangeHistoryVisible] = useState(false);
     const [isBuddiesVisible, setIsBuddiesVisible] = useState(false);
     const [selectedDateIndex, setSelectedDateIndex] = useState(0);
+    const [showDeletePanel, setShowDeletePanel] = useState(false);
     const lastPressTime = useRef<number | null>(null);
     const listRef = useRef<ScrollView>(null);
 
@@ -273,12 +274,14 @@ export default function TripDetailScreen() {
         deleteActivity(req.activityId);
         removeDeletionRequest(req.id);
         sendDeleteRequestCancelled(req.tripId, req.id);
-    }, [deleteActivity, removeDeletionRequest, sendDeleteRequestCancelled]);
+        if (tripDeletionRequests.length <= 1) setShowDeletePanel(false);
+    }, [deleteActivity, removeDeletionRequest, sendDeleteRequestCancelled, tripDeletionRequests.length]);
 
     const handleRejectDelete = useCallback((req: typeof tripDeletionRequests[0]) => {
         removeDeletionRequest(req.id);
         sendDeleteRequestCancelled(req.tripId, req.id);
-    }, [removeDeletionRequest, sendDeleteRequestCancelled]);
+        if (tripDeletionRequests.length <= 1) setShowDeletePanel(false);
+    }, [removeDeletionRequest, sendDeleteRequestCancelled, tripDeletionRequests.length]);
 
     const logSpontaneousExpense = useStore(state => state.logSpontaneousExpense);
 
@@ -299,13 +302,44 @@ export default function TripDetailScreen() {
     }, []);
 
     const renderHeader = useCallback(() => (
-            <Header 
-                title={trip?.title?.toUpperCase() || ''} 
+            <Header
+                title={trip?.title?.toUpperCase() || ''}
                 showBack={true}
                 onBack={() => router.replace('/')}
                 showThemeToggle={false}
+                rightElement={
+                    isCreator && tripDeletionRequests.length > 0 ? (
+                        <TouchableOpacity
+                            onPress={() => setShowDeletePanel(prev => !prev)}
+                            activeOpacity={0.75}
+                            style={{ position: 'relative' }}
+                        >
+                            <View style={{
+                                width: 40, height: 40, borderRadius: 12,
+                                backgroundColor: showDeletePanel
+                                    ? (isDark ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.25)')
+                                    : (isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.12)'),
+                                borderWidth: 1, borderColor: isDark ? 'rgba(245,158,11,0.35)' : 'rgba(245,158,11,0.4)',
+                                alignItems: 'center', justifyContent: 'center',
+                            }}>
+                                <Feather name="alert-triangle" size={18} color="#F5A623" />
+                            </View>
+                            <View style={{
+                                position: 'absolute', top: -4, right: -4,
+                                minWidth: 16, height: 16, borderRadius: 8,
+                                backgroundColor: '#ef4444',
+                                alignItems: 'center', justifyContent: 'center',
+                                paddingHorizontal: 3,
+                            }}>
+                                <Text style={{ fontSize: 9, fontWeight: '900', color: '#fff' }}>
+                                    {tripDeletionRequests.length}
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+                    ) : undefined
+                }
             />
-        ), [trip, router]);
+        ), [trip, router, isCreator, tripDeletionRequests, isDark, showDeletePanel]);
 
     if (!trip) {
         return (
@@ -323,6 +357,69 @@ export default function TripDetailScreen() {
             <StatusBar style={isDark ? 'light' : 'dark'} />
             
             {renderHeader()}
+
+            {/* Delete request dropdown — floats below header, only visible when panel is open */}
+            {isCreator && showDeletePanel && tripDeletionRequests.length > 0 && (
+                <>
+                    {/* Backdrop to dismiss panel */}
+                    <TouchableOpacity
+                        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }}
+                        activeOpacity={1}
+                        onPress={() => setShowDeletePanel(false)}
+                    />
+                    <View style={{
+                        position: 'absolute', top: insets.top + 60, right: 16, zIndex: 100,
+                        width: 280,
+                        backgroundColor: isDark ? '#1A2019' : '#FFFFFF',
+                        borderRadius: 18,
+                        borderWidth: 1, borderColor: isDark ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.35)',
+                        shadowColor: '#000', shadowOffset: { width: 0, height: 6 },
+                        shadowOpacity: 0.18, shadowRadius: 16, elevation: 12,
+                        overflow: 'hidden',
+                    }}>
+                        <View style={{
+                            flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10,
+                            borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.2)',
+                        }}>
+                            <Feather name="alert-triangle" size={12} color="#F5A623" style={{ marginRight: 6 }} />
+                            <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 1.5, color: '#F5A623', textTransform: 'uppercase' }}>
+                                DELETION REQUESTS
+                            </Text>
+                        </View>
+                        {tripDeletionRequests.map((req, index) => (
+                            <View key={req.id} style={{
+                                padding: 14,
+                                borderBottomWidth: index < tripDeletionRequests.length - 1 ? 1 : 0,
+                                borderBottomColor: isDark ? 'rgba(158,178,148,0.1)' : 'rgba(0,0,0,0.06)',
+                            }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                                    <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: req.requestedByColor, marginRight: 7 }} />
+                                    <Text style={{ fontSize: 9, fontWeight: '900', letterSpacing: 0.5, color: isDark ? '#F5A623' : '#B45309', flex: 1 }}>
+                                        {req.requestedByName.toUpperCase()}
+                                    </Text>
+                                </View>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#F2F0E8' : '#111827', marginBottom: 10 }} numberOfLines={1}>
+                                    "{req.activityTitle}"
+                                </Text>
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    <TouchableOpacity
+                                        onPress={() => handleRejectDelete(req)}
+                                        style={{ flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(0,0,0,0.1)' }}
+                                    >
+                                        <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: isDark ? '#9EB294' : '#6B7280' }}>DENY</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => handleApproveDelete(req)}
+                                        style={{ flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center', backgroundColor: '#ef4444' }}
+                                    >
+                                        <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: '#fff' }}>APPROVE</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        ))}
+                    </View>
+                </>
+            )}
 
             <ScrollView
                 ref={listRef as any}
@@ -370,35 +467,55 @@ export default function TripDetailScreen() {
 
                             {/* Wallet Balance */}
                             <View style={{ flex: 1, paddingLeft: 12 }}>
-                                <GestureDetector
-                                    gesture={Gesture.Exclusive(
-                                        Gesture.Pan()
-                                            .activeOffsetX([-10, 10])
-                                            .onEnd((event: any) => {
-                                                if (Math.abs(event.translationX) > 30) runOnJS(toggleBalanceMode)();
-                                            }),
-                                        Gesture.LongPress()
-                                            .onEnd(() => { runOnJS(setIsExchangeHistoryVisible)(true); }),
-                                        Gesture.Tap()
-                                            .onEnd(() => { runOnJS(setIsAddExchangeVisible)(true); })
-                                    )}
-                                >
-                                    <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
-                                        <Text className={`text-[10px] font-black uppercase tracking-[1.5px] mb-1 ${isDark ? 'text-[#9EB294]' : 'text-[#6B7280]'}`} numberOfLines={1}>
-                                            WALLET
-                                        </Text>
-                                        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}
-                                            style={{ fontSize: 22, fontWeight: '900', color: isDark ? '#B2C4AA' : '#5D6D54' }}>
-                                            {balanceFormatted}
-                                        </Text>
-                                        {balanceDetail && (
-                                            <Text numberOfLines={1}
-                                                style={{ fontSize: 7, fontWeight: '700', color: isDark ? '#9EB294' : '#9ca3af', marginTop: 1, letterSpacing: 0.5, opacity: 0.8, textTransform: 'uppercase' }}>
-                                                {balanceDetail}
-                                            </Text>
+                                <View style={{
+                                    borderRadius: 16,
+                                    overflow: 'hidden',
+                                    backgroundColor: isDark ? 'rgba(158,178,148,0.06)' : 'rgba(93,109,84,0.05)',
+                                    paddingVertical: 8,
+                                    paddingHorizontal: 10,
+                                }}>
+                                    {/* Faded watermark icon */}
+                                    <Feather
+                                        name="credit-card"
+                                        size={52}
+                                        color={isDark ? 'rgba(178,196,170,0.10)' : 'rgba(93,109,84,0.09)'}
+                                        style={{ position: 'absolute', right: -4, bottom: -6 }}
+                                    />
+                                    <GestureDetector
+                                        gesture={Gesture.Exclusive(
+                                            Gesture.Pan()
+                                                .activeOffsetX([-10, 10])
+                                                .failOffsetY([-8, 8])
+                                                .onEnd((event: any) => {
+                                                    if (Math.abs(event.translationX) > 30) runOnJS(toggleBalanceMode)();
+                                                }),
+                                            Gesture.LongPress()
+                                                .onEnd(() => { runOnJS(setIsExchangeHistoryVisible)(true); }),
+                                            Gesture.Tap()
+                                                .onEnd(() => { runOnJS(setIsAddExchangeVisible)(true); })
                                         )}
-                                    </View>
-                                </GestureDetector>
+                                    >
+                                        <View style={{ alignItems: 'flex-end', justifyContent: 'center', width: '100%' }}>
+                                            <View style={{ height: 14, justifyContent: 'center' }}>
+                                                <Text className={`text-[10px] font-black uppercase tracking-[1.5px] ${isDark ? 'text-[#9EB294]' : 'text-[#6B7280]'}`} numberOfLines={1}>
+                                                    WALLET
+                                                </Text>
+                                            </View>
+                                            <View style={{ height: 30, justifyContent: 'center' }}>
+                                                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
+                                                    style={{ fontSize: 22, fontWeight: '900', color: isDark ? '#B2C4AA' : '#5D6D54' }}>
+                                                    {balanceFormatted}
+                                                </Text>
+                                            </View>
+                                            <View style={{ height: 11, justifyContent: 'center' }}>
+                                                <Text numberOfLines={1}
+                                                    style={{ fontSize: 7, fontWeight: '700', color: isDark ? '#9EB294' : '#9ca3af', letterSpacing: 0.5, opacity: balanceDetail ? 0.8 : 0, textTransform: 'uppercase' }}>
+                                                    {balanceDetail || ' '}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    </GestureDetector>
+                                </View>
                             </View>
                         </View>
 
@@ -441,64 +558,31 @@ export default function TripDetailScreen() {
                                             Allotted vs Wallet
                                         </Text>
                                     </View>
-                                    {/* Budget bar with text inside */}
-                                    <View style={{
-                                        height: 20, borderRadius: 10, overflow: 'hidden',
-                                        backgroundColor: isDark ? 'rgba(158, 178, 148, 0.08)' : 'rgba(158, 178, 148, 0.15)',
-                                    }}>
-                                        <View style={{
-                                            height: '100%', borderRadius: 10,
-                                            width: `${totalWalletBudgetHome > 0 ? Math.min((totalCommittedHome / totalWalletBudgetHome) * 100, 100) : 0}%`,
-                                            backgroundColor: isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54'),
-                                        }} />
-                                        <View style={{ ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' }}>
-                                            <Text style={{ fontSize: 8, fontWeight: '900', color: isDark ? '#F2F0E8' : '#1A1C18', textShadowColor: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)', textShadowRadius: 4, textShadowOffset: { width: 0, height: 0 } }} numberOfLines={1}>
-                                                {budgetDisplayHome
-                                                    ? `${MathUtils.formatCurrency(totalCommittedHome, homeCurrency)} / ${MathUtils.formatCurrency(totalWalletBudgetHome, homeCurrency)}`
-                                                    : `${MathUtils.formatCurrency(totalCommittedTrip, tripCurrency)} / ${MathUtils.formatCurrency(totalWalletBudgetTrip, tripCurrency)}`
-                                                }
-                                            </Text>
-                                        </View>
-                                    </View>
+                                    {/* Budget bar: label always visible above bar */}
+                                    {(() => {
+                                        const budgetPct = totalWalletBudgetHome > 0 ? Math.min((totalCommittedHome / totalWalletBudgetHome) * 100, 100) : 0;
+                                        const barLabel = budgetDisplayHome
+                                            ? `${MathUtils.formatCurrency(totalCommittedHome, homeCurrency)} / ${MathUtils.formatCurrency(totalWalletBudgetHome, homeCurrency)}`
+                                            : `${MathUtils.formatCurrency(totalCommittedTrip, tripCurrency)} / ${MathUtils.formatCurrency(totalWalletBudgetTrip, tripCurrency)}`;
+                                        const barColor = isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54');
+                                        const trackColor = isDark ? 'rgba(158, 178, 148, 0.08)' : 'rgba(158, 178, 148, 0.15)';
+                                        return (
+                                            <View>
+                                                <Text style={{ fontSize: 10, fontWeight: '900', color: isDark ? 'rgba(242,240,232,0.85)' : 'rgba(26,28,24,0.75)', letterSpacing: 0.3, textAlign: 'center', marginBottom: 4 }} numberOfLines={1}>
+                                                    {barLabel}
+                                                </Text>
+                                                <View style={{ height: 6, borderRadius: 3, backgroundColor: trackColor }}>
+                                                    <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${budgetPct}%`, backgroundColor: barColor, borderRadius: 3 }} />
+                                                </View>
+                                            </View>
+                                        );
+                                    })()}
                                 </View>
                             </GestureDetector>
                         )}
                     </GlassView>
                 </View>
 
-                {/* Deletion request banner — only shown to creator */}
-                {isCreator && tripDeletionRequests.length > 0 && tripDeletionRequests.map(req => (
-                    <View key={req.id} style={{
-                        marginHorizontal: 16, marginBottom: 10, borderRadius: 18,
-                        backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : 'rgba(245,158,11,0.1)',
-                        borderWidth: 1, borderColor: isDark ? 'rgba(245,158,11,0.25)' : 'rgba(245,158,11,0.3)',
-                        padding: 14,
-                    }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: req.requestedByColor, marginRight: 8 }} />
-                            <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: isDark ? '#F5A623' : '#B45309', flex: 1 }}>
-                                {req.requestedByName.toUpperCase()} REQUESTS DELETION
-                            </Text>
-                        </View>
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#F2F0E8' : '#111827', marginBottom: 12 }} numberOfLines={1}>
-                            "{req.activityTitle}"
-                        </Text>
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                            <TouchableOpacity
-                                onPress={() => handleRejectDelete(req)}
-                                style={{ flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(0,0,0,0.1)' }}
-                            >
-                                <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: isDark ? '#9EB294' : '#6B7280' }}>DENY</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={() => handleApproveDelete(req)}
-                                style={{ flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: '#ef4444' }}
-                            >
-                                <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: '#fff' }}>APPROVE</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                ))}
 
                 {/* Date navigator */}
                 {activitiesByDate.length > 1 && (

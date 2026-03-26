@@ -11,13 +11,14 @@ interface Props {
     onPress?: (activity: Activity) => void;
     onEdit?: (activity: Activity) => void;
     onDelete?: (activity: Activity) => void;
+    onRequestDelete?: (activity: Activity) => void;
     onToggleComplete?: (activityId: string) => void;
 }
 
 type ViewMode = 'planned' | 'spontaneous';
 
 export const ActivitiesSection = React.memo(({
-    activities, tripTitle, onPress, onEdit, onDelete, onToggleComplete,
+    activities, tripTitle, onPress, onEdit, onDelete, onRequestDelete, onToggleComplete,
 }: Props) => {
     const { theme } = useStore();
     const isDark = theme === 'dark';
@@ -100,6 +101,7 @@ export const ActivitiesSection = React.memo(({
                         onPress={onPress}
                         onEdit={onEdit}
                         onDelete={onDelete}
+                        onRequestDelete={onRequestDelete}
                         onToggleComplete={onToggleComplete ? () => onToggleComplete(activity.id) : undefined}
                     />
                 ))

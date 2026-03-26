@@ -25,7 +25,11 @@ export function usePermissions(tripId: string) {
             ? members.find(m => m.userId === userId) || members.find(m => m.isCreator) || null
             : members.find(m => m.isCreator) || null;
 
-        const isCreator = currentMember?.isCreator === true;
+        // isCreator via member record, OR fallback: if no member record found but the trip was
+        // created locally (role is undefined — imported trips always have role='admin'/'viewer'),
+        // the current user is the owner whose creator record was never added to the server members array.
+        const isCreator = currentMember?.isCreator === true ||
+            (!currentMember && trip?.role === undefined);
 
         // Trip-level role (set at invite acceptance) acts as a ceiling
         const tripLevelViewer = trip?.role === 'viewer';
