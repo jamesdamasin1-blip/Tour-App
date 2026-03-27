@@ -4,7 +4,8 @@
  * - While online: runs sync periodically (every 30s)
  * - On app foreground: refreshes status
  */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
+import { useMountEffect } from './useMountEffect';
 import { AppState, type AppStateStatus } from 'react-native';
 import Constants from 'expo-constants';
 import { runSync, getSyncStatus, startSyncLoop, stopSyncLoop } from '../sync/syncEngine';
@@ -19,7 +20,7 @@ export const useNetworkStatus = () => {
     const wasOffline = useRef(false);
 
     // Poll connectivity with a lightweight fetch
-    useEffect(() => {
+    useMountEffect(() => {
         const checkConnectivity = async () => {
             try {
                 const controller = new AbortController();
@@ -49,33 +50,26 @@ export const useNetworkStatus = () => {
 
         checkConnectivity();
         const interval = setInterval(checkConnectivity, 15_000);
-        return () => clearInterval(interval);
-    }, []); // stable deps — wasOffline is a ref, setters are stable
 
-    // Sync loop lifecycle is managed by useAuth (starts after authentication).
-    // This hook only restarts it on reconnection after offline periods.
-    // Stop sync loop on unmount as a safety cleanup.
-    useEffect(() => {
-        return () => stopSyncLoop();
-    }, []);
-
-    // Sync when app comes to foreground
-    useEffect(() => {
+        // Sync when app comes to foreground
         const handleAppState = (state: AppStateStatus) => {
             if (state === 'active') {
                 setSyncStatus(getSyncStatus());
                 setQueueStats(getQueueStats());
-                // Trigger a sync when app comes back to foreground
                 runSync().then(() => {
                     setSyncStatus(getSyncStatus());
                     setQueueStats(getQueueStats());
                 }).catch(console.error);
             }
         };
-
         const sub = AppState.addEventListener('change', handleAppState);
-        return () => sub.remove();
-    }, []);
+
+        return () => {
+            clearInterval(interval);
+            sub.remove();
+            stopSyncLoop();
+        };
+    });
 
     const triggerSync = async () => {
         if (!isOnline) return { pushed: 0, pulled: 0 };

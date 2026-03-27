@@ -3,7 +3,8 @@
  * Manages login/logout, triggers sync on auth changes,
  * and handles automatic token refresh.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { useMountEffect } from './useMountEffect';
 import {
     type AuthState,
     getAuthState,
@@ -28,7 +29,7 @@ export const useAuth = () => {
     });
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
+    useMountEffect(() => {
         // Bridge sync engine pulls → Zustand store using version-based merge
         onRemoteUpdate(({ trips, activities, expenses, sharedTripIds, currentUserId, deletedTripIds, deletedActivityIds, deletedExpenseIds }) => {
             console.log(`[onRemoteUpdate] trips=${trips?.length || 0}, activities=${activities?.length || 0}, expenses=${expenses?.length || 0}, deleted: ${deletedTripIds?.length || 0}T/${deletedActivityIds?.length || 0}A/${deletedExpenseIds?.length || 0}E`);
@@ -51,13 +52,40 @@ export const useAuth = () => {
             }
 
             if (deletedExpenseIds?.length) {
-                useStore.setState(s => ({
-                    expenses: s.expenses.filter(e => !deletedExpenseIds.includes(e.id)),
-                    activities: s.activities.map(a => ({
-                        ...a,
-                        expenses: a.expenses.filter(e => !deletedExpenseIds!.includes(e.id)),
-                    })),
-                }));
+                const { reverseFIFO, recomputeWalletSpent } = require('../store/storeHelpers');
+                useStore.setState(s => {
+                    // Reverse each deleted expense's FIFO deduction from wallet lots
+                    const deletedSet = new Set(deletedExpenseIds);
+                    const deletedExpenses = s.expenses.filter(e => deletedSet.has(e.id));
+                    const remainingExpenses = s.expenses.filter(e => !deletedSet.has(e.id));
+
+                    let updatedTrips = s.trips;
+                    if (deletedExpenses.length > 0) {
+                        const affectedTripIds = new Set(deletedExpenses.map(e => e.tripId));
+                        updatedTrips = s.trips.map(t => {
+                            if (!affectedTripIds.has(t.id)) return t;
+                            const toReverse = deletedExpenses.filter(e => e.tripId === t.id);
+                            let wallets = t.wallets || [];
+                            for (const exp of toReverse) {
+                                wallets = wallets.map((w: any) => {
+                                    if (w.id !== exp.walletId) return w;
+                                    return { ...w, lots: reverseFIFO(w, exp) };
+                                });
+                            }
+                            wallets = recomputeWalletSpent(wallets, remainingExpenses.filter(e => e.tripId === t.id));
+                            return { ...t, wallets };
+                        });
+                    }
+
+                    return {
+                        expenses: remainingExpenses,
+                        activities: s.activities.map(a => ({
+                            ...a,
+                            expenses: a.expenses.filter(e => !deletedSet.has(e.id)),
+                        })),
+                        trips: updatedTrips,
+                    };
+                });
                 for (const id of deletedExpenseIds) deleteLocalRecord('expenses', id);
             }
 
@@ -94,22 +122,14 @@ export const useAuth = () => {
                 });
             }
 
-            // ── Version-aware activity/expense merge for shared trips ─
-            const getMemberTripIds = (s: typeof useStore extends { getState: () => infer S } ? S : never) => {
-                return s.trips
-                    .filter(t => {
-                        const members = t.members || [];
-                        const isMember = members.some((m: any) => m.userId === currentUserId);
-                        if (!isMember) return false;
-                        const isOwner = (t as any).userId === currentUserId || (t as any).user_id === currentUserId;
-                        return !isOwner;
-                    })
-                    .map(t => t.id);
-            };
+            // Returns all trip IDs the user has locally — sync should apply to all trips,
+            // not just shared ones, so single-user multi-device scenarios also work.
+            const getAllTripIds = (s: typeof useStore extends { getState: () => infer S } ? S : never) =>
+                s.trips.map(t => t.id);
 
             if (sharedTripIds?.length && activities) {
                 useStore.setState(s => {
-                    const memberTripIds = getMemberTripIds(s);
+                    const memberTripIds = getAllTripIds(s);
                     if (memberTripIds.length === 0) return s;
 
                     const remoteForMemberTrips = activities.filter(a => memberTripIds.includes(a.tripId));
@@ -148,7 +168,7 @@ export const useAuth = () => {
 
             if (sharedTripIds?.length && expenses) {
                 useStore.setState(s => {
-                    const memberTripIds = getMemberTripIds(s);
+                    const memberTripIds = getAllTripIds(s);
                     if (memberTripIds.length === 0) return s;
 
                     const remoteForMemberTrips = expenses.filter(e => memberTripIds.includes(e.tripId));
@@ -307,7 +327,7 @@ export const useAuth = () => {
             stopSyncLoop();
             clearInterval(sessionCheck);
         };
-    }, []);
+    });
 
     const login = useCallback(async () => {
         setLoading(true);

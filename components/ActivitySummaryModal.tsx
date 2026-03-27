@@ -131,13 +131,26 @@ export function ActivitySummaryModal({
                                             </Text>
                                         </TouchableOpacity>
 
-                                        <TouchableOpacity 
-                                            onPress={onClose} 
+                                        <TouchableOpacity
+                                            onPress={onClose}
                                             className={`flex-1 py-4 rounded-xl items-center border ${isDark ? 'bg-[#3A3F37] border-[#4A5046]' : 'bg-gray-200 border-gray-300'}`}
                                         >
                                             <Text className={`text-[13px] font-black tracking-widest uppercase ${isDark ? 'text-[#B2C4AA]' : 'text-gray-500'}`}>CLOSE</Text>
                                         </TouchableOpacity>
                                     </View>
+
+                                    {activity.isCompleted && (
+                                        <Text style={{
+                                            fontSize: 10,
+                                            fontWeight: '700',
+                                            textAlign: 'center',
+                                            marginTop: 12,
+                                            color: isDark ? 'rgba(158,178,148,0.5)' : 'rgba(93,109,84,0.5)',
+                                            letterSpacing: 0.5,
+                                        }}>
+                                            REOPEN TO ENABLE EDITING & DELETION
+                                        </Text>
+                                    )}
                                 </View>
                             </View>
 

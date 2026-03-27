@@ -19,7 +19,7 @@ type SyncStatus = 'idle' | 'syncing' | 'error';
 let _syncStatus: SyncStatus = 'idle';
 let _syncTimer: ReturnType<typeof setTimeout> | null = null;
 let _syncRunning = false; // guard against concurrent sync runs
-const SYNC_INTERVAL = 30_000; // 30 seconds
+const SYNC_INTERVAL = 8_000; // 8 seconds — fast enough for near-real-time fallback
 
 export const getSyncStatus = () => _syncStatus;
 
@@ -312,7 +312,19 @@ const mapExpenseFromSupabase = (e: any) => ({
 /** Pull remote changes — version-aware, soft-delete aware */
 const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
     const lastSync = getSyncMeta('lastPullTimestamp');
-    const since = lastSync ? parseInt(lastSync) : 0;
+    // Convert legacy Unix-ms timestamps to ISO strings for correct PostgreSQL comparison
+    let since: string | null = null;
+    if (lastSync) {
+        const asNum = Number(lastSync);
+        if (!isNaN(asNum) && asNum > 1_000_000_000_000) {
+            // Legacy Unix ms — convert to ISO
+            since = new Date(asNum).toISOString();
+        } else if (lastSync.includes('T') || lastSync.includes('-')) {
+            // Already an ISO string
+            since = lastSync;
+        }
+        // else: invalid — treat as first sync (since stays null)
+    }
     let pulled = 0;
 
     // ── Pull trips (owned + member-of), ALIVE records ──────────
@@ -323,7 +335,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
         .is('deleted_at', null)
         .or(`user_id.eq.${auth.userId},members.cs.${memberFilter}`);
 
-    if (since > 0) {
+    if (since) {
         tripQuery = tripQuery.gt('updated_at', since);
     }
 
@@ -340,7 +352,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
 
     // ── Detect soft-deleted trips ──────────────────────────────
     const deletedTripIds: string[] = [];
-    if (since > 0) {
+    if (since) {
         const { data: deletedTrips } = await supabase
             .from('trips')
             .select('id')
@@ -389,7 +401,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
         }
 
         // Detect soft-deleted activities
-        if (since > 0) {
+        if (since) {
             const { data: deletedActs } = await supabase
                 .from('activities')
                 .select('id')
@@ -421,7 +433,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
         }
 
         // Detect soft-deleted expenses
-        if (since > 0) {
+        if (since) {
             const { data: deletedExps } = await supabase
                 .from('expenses')
                 .select('id')
@@ -455,7 +467,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
         console.warn('[SyncEngine] No onRemoteUpdate callback registered!');
     }
 
-    setSyncMeta('lastPullTimestamp', Date.now().toString());
+    setSyncMeta('lastPullTimestamp', new Date().toISOString());
     return pulled;
 };
 

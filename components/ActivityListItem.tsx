@@ -109,16 +109,21 @@ export const ActivityListItem = React.memo(({
     const triggerHaptic = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const isRequestMode = !onDelete && !!onRequestDelete;
     const triggerDelete = () => {
+        if (activity.isCompleted) return;
         if (onDelete) onDelete(activity);
         else onRequestDelete?.(activity);
     };
-    const triggerEdit = () => onEdit?.(activity);
+    const triggerEdit = () => {
+        if (activity.isCompleted) return;
+        onEdit?.(activity);
+    };
 
     const pan = Gesture.Pan()
         .activeOffsetX([-8, 8])
         .failOffsetY([-10, 10])
+        .enabled(!activity.isCompleted)
         .onUpdate((e) => {
-            const clamped = Math.max(-MAX_SWIPE_RIGHT, Math.min(activity.isCompleted ? 0 : MAX_SWIPE_LEFT, e.translationX));
+            const clamped = Math.max(-MAX_SWIPE_RIGHT, Math.min(MAX_SWIPE_LEFT, e.translationX));
             translateX.value = clamped;
 
             if (clamped < -ACTION_TRIGGER && !hapticFiredRight.value) {
@@ -225,20 +230,18 @@ export const ActivityListItem = React.memo(({
                                 </Animated.View>
                             </Animated.View>
 
-                            {/* Edit gradient tint */}
-                            {!activity.isCompleted && (
-                                <Animated.View style={[StyleSheet.absoluteFillObject, styles.overlayRadius, editOverlayStyle]} pointerEvents="none">
-                                    <LinearGradient
-                                        colors={['rgba(59, 130, 246, 0.5)', 'transparent']}
-                                        start={{ x: 0, y: 0.5 }}
-                                        end={{ x: 0.8, y: 0.5 }}
-                                        style={StyleSheet.absoluteFill}
-                                    />
-                                    <Animated.View style={[styles.edgeIcon, styles.edgeIconLeft, editIconStyle]}>
-                                        <Feather name="edit-2" size={22} color="rgba(37,99,235,0.95)" />
-                                    </Animated.View>
+                            {/* Edit gradient tint — hidden when completed (gesture is disabled) */}
+                            <Animated.View style={[StyleSheet.absoluteFillObject, styles.overlayRadius, editOverlayStyle]} pointerEvents="none">
+                                <LinearGradient
+                                    colors={['rgba(59, 130, 246, 0.5)', 'transparent']}
+                                    start={{ x: 0, y: 0.5 }}
+                                    end={{ x: 0.8, y: 0.5 }}
+                                    style={StyleSheet.absoluteFill}
+                                />
+                                <Animated.View style={[styles.edgeIcon, styles.edgeIconLeft, editIconStyle]}>
+                                    <Feather name="edit-2" size={22} color="rgba(37,99,235,0.95)" />
                                 </Animated.View>
-                            )}
+                            </Animated.View>
 
 
                             {activity.isCompleted && (

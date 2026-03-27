@@ -42,3 +42,21 @@ app-example
 # generated native folders
 /ios
 /android
+
+# build artifacts
+*.apk
+app-release*
+
+# debug scripts
+check_db.mjs
+check_realtime.mjs
+check_types.mjs
+dump_activities.mjs
+dump_supabase_activities.mjs
+test_nan.mjs
+
+# local state
+.claude/
+emulator_local_db.db
+device1.png
+device2.png

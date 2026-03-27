@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { useStore } from '../../../store/useStore';
 import { CurrencyService } from '../../../services/currency';
@@ -36,12 +36,13 @@ export const useAddExpense = (activityId: string) => {
     const [currency, setCurrency] = useState(tripCurrency);
     const [isCurrencyModalVisible, setIsCurrencyModalVisible] = useState(false);
 
-    // Sync currency with trip currency on load
-    useEffect(() => {
-        if (tripCurrency) {
-            setCurrency(tripCurrency);
-        }
-    }, [tripCurrency]);
+    // Initialize currency once when tripCurrency becomes available.
+    // Ref guard prevents re-setting after the user has changed currency.
+    const currencyInitRef = useRef(false);
+    if (tripCurrency && !currencyInitRef.current) {
+        currencyInitRef.current = true;
+        setCurrency(tripCurrency);
+    }
 
     const availableCurrencies = useMemo(() => {
         return [tripCurrency, homeCurrency];
@@ -91,6 +92,7 @@ export const useAddExpense = (activityId: string) => {
             convertedAmountHome: conversions.home, // Pre-computed Home Layer
             convertedAmountTrip: conversions.trip, // Pre-computed Trip Layer
             createdBy: currentMember?.id,
+            version: 1,
         });
         
         router.back();

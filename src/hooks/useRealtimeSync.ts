@@ -12,7 +12,8 @@
  * - incoming.version > local.version → apply
  * - incoming.version <= local.version → ignore (local is newer or equal)
  */
-import { useEffect, useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect, useMemo } from 'react';
+import { useMountEffect } from './useMountEffect';
 import { useStore } from '@/src/store/useStore';
 import { supabase } from '@/src/utils/supabase';
 import { runSync } from '@/src/sync/syncEngine';
@@ -22,6 +23,14 @@ import { mergeEntity } from '@/src/sync/syncHelpers';
 import { recomputeWalletSpent } from '@/src/store/storeHelpers';
 import type { Activity, Expense, TripPlan } from '@/src/types/models';
 import type { DeletionRequest } from '@/src/store/slices/settingsSlice';
+
+// ─── Helpers ────────────────────────────────────────────────────
+
+/** Convert a DB value to a safe finite number (never NaN/Infinity). */
+const safeNum = (v: unknown, fallback = 0): number => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+};
 
 // ─── Snake → Camel mappers ──────────────────────────────────────
 
@@ -90,18 +99,18 @@ function mapExpenseFromPayload(row: any): Partial<Expense> {
     if ('wallet_id' in row) result.walletId = row.wallet_id;
     if ('activity_id' in row) result.activityId = row.activity_id;
     if ('name' in row) result.name = row.name;
-    if ('amount' in row) result.amount = Number(row.amount);
+    if ('amount' in row) result.amount = safeNum(row.amount);
     if ('currency' in row) result.currency = row.currency;
-    if ('converted_amount_home' in row) result.convertedAmountHome = Number(row.converted_amount_home);
-    if ('converted_amount_trip' in row) result.convertedAmountTrip = Number(row.converted_amount_trip);
+    if ('converted_amount_home' in row) result.convertedAmountHome = safeNum(row.converted_amount_home);
+    if ('converted_amount_trip' in row) result.convertedAmountTrip = safeNum(row.converted_amount_trip);
     if ('category' in row) result.category = row.category;
-    if ('time' in row) result.time = Number(row.time);
-    if ('date' in row) result.date = Number(row.date);
-    if ('original_amount' in row) result.originalAmount = row.original_amount ? Number(row.original_amount) : undefined;
+    if ('time' in row) result.time = safeNum(row.time);
+    if ('date' in row) result.date = safeNum(row.date);
+    if ('original_amount' in row) result.originalAmount = row.original_amount ? safeNum(row.original_amount) : undefined;
     if ('original_currency' in row) result.originalCurrency = row.original_currency;
     if ('created_by' in row) result.createdBy = row.created_by;
     if ('last_modified_by' in row) result.lastModifiedBy = row.last_modified_by;
-    if ('version' in row) result.version = Number(row.version || 1);
+    if ('version' in row) result.version = safeNum(row.version, 1);
     if ('updated_by' in row) result.updatedBy = row.updated_by || undefined;
     if ('deleted_at' in row) result.deletedAt = row.deleted_at || null;
     if ('field_updates' in row) result.fieldUpdates = row.field_updates || {};
@@ -271,11 +280,13 @@ function applyExpenseChange(payload: any) {
         useStore.setState(s => {
             const localExpense = (s.expenses || []).find(e => e.id === incoming.id);
             const updatedExpenses = (s.expenses || []).filter(e => e.id !== incoming.id);
-            const updatedActivities = activityId
-                ? (s.activities || []).map(a => a.id === activityId
-                    ? { ...a, expenses: (a.expenses || []).filter(e => e.id !== incoming.id) }
-                    : a
-                ) : (s.activities || []);
+            // activityId may be absent when Postgres REPLICA IDENTITY is DEFAULT (only PK in old row).
+            // Scan all activities to ensure the expense is removed from its parent.
+            const updatedActivities = (s.activities || []).map(a => {
+                if (activityId && a.id !== activityId) return a;
+                const filtered = (a.expenses || []).filter(e => e.id !== incoming.id);
+                return filtered.length === a.expenses?.length ? a : { ...a, expenses: filtered };
+            });
 
             const updatedTrips = s.trips.map(t => {
                 if (t.id !== incoming.tripId) return t;
@@ -284,7 +295,28 @@ function applyExpenseChange(payload: any) {
                     try {
                         const linkedA = (s.activities || []).find(a => a.id === localExpense.activityId);
                         if (linkedA?.isSpontaneous) return w; // Skip credit-back for spontaneous items Node triggers
-                        return { ...w, lots: reverseFIFO(w, localExpense) };
+                        let lots = reverseFIFO(w, localExpense);
+
+                        // After reversing, re-apply FIFO for any expenses in this wallet
+                        // whose FIFO failed on arrival (no lotBreakdown). This fixes the
+                        // race condition where a new expense INSERT arrives before the old
+                        // expense DELETE — the wallet was at 0 so FIFO threw, but now
+                        // that the old expense is reversed the balance is available.
+                        const pendingFifo = updatedExpenses.filter(
+                            e => e.walletId === w.id && !e.lotBreakdown
+                        );
+                        for (const exp of pendingFifo) {
+                            const amount = Number(exp.convertedAmountTrip || exp.amount || 0);
+                            if (amount > 0) {
+                                try {
+                                    const result = applyExpenseFIFO({ ...w, lots } as any, amount);
+                                    lots = result.updatedWallet.lots;
+                                    exp.lotBreakdown = result.breakdown;
+                                } catch { /* wallet may still be overdrawn — skip */ }
+                            }
+                        }
+
+                        return { ...w, lots };
                     } catch (e) {
                         return w;
                     }
@@ -303,56 +335,71 @@ function applyExpenseChange(payload: any) {
     }
 
     useStore.setState(s => {
-        const local = (s.expenses || []).find(e => e.id === incoming.id);
-        const mergedExpense = local 
-            ? mergeEntity(local, incoming, [
-                'name', 'amount', 'currency', 'convertedAmountHome', 'convertedAmountTrip',
-                'category', 'time', 'date', 'originalAmount', 'originalCurrency', 'lotBreakdown'
-            ])
-            : (incoming as Expense);
+        try {
+            const local = (s.expenses || []).find(e => e.id === incoming.id);
+            const mergedExpense = local
+                ? mergeEntity(local, incoming, [
+                    'name', 'amount', 'currency', 'convertedAmountHome', 'convertedAmountTrip',
+                    'category', 'time', 'date', 'originalAmount', 'originalCurrency', 'lotBreakdown'
+                ])
+                : (incoming as Expense);
 
-        const updatedExpenses = local
-            ? (s.expenses || []).map(e => e.id === incoming.id ? mergedExpense : e)
-            : [...(s.expenses || []), mergedExpense];
+            // Ensure converted amounts are always valid finite numbers
+            mergedExpense.convertedAmountHome = safeNum(mergedExpense.convertedAmountHome);
+            mergedExpense.convertedAmountTrip = safeNum(mergedExpense.convertedAmountTrip);
+            mergedExpense.amount = safeNum(mergedExpense.amount);
 
-        let lotBreakdownToSave = mergedExpense.lotBreakdown;
+            // If trip currency amount is missing but home amount exists, derive it from the
+            // other direction using the wallet rate so downstream FIFO has something to work with.
+            if (mergedExpense.convertedAmountTrip === 0 && mergedExpense.convertedAmountHome > 0) {
+                const fallbackWallet = (s.trips.find(t => t.id === incoming.tripId)?.wallets || [])
+                    .find(w => w.id === incoming.walletId);
+                const rate = (fallbackWallet as any)?.baselineExchangeRate || (fallbackWallet as any)?.defaultRate || 1;
+                mergedExpense.convertedAmountTrip = safeNum(mergedExpense.convertedAmountHome / rate);
+            }
 
-        const updatedTrips = s.trips.map(t => {
-            if (t.id !== incoming.tripId) return t;
+            const updatedExpenses = local
+                ? (s.expenses || []).map(e => e.id === incoming.id ? mergedExpense : e)
+                : [...(s.expenses || []), mergedExpense];
 
-            const updatedWallets = t.wallets.map(w => {
-                if (w.id !== incoming.walletId) return w;
+            let lotBreakdownToSave = mergedExpense.lotBreakdown;
 
-                try {
-                    const convertedAmount = Number(mergedExpense.convertedAmountTrip || mergedExpense.amount || 0);
-                    if (convertedAmount <= 0) {
-                        console.warn('[Realtime] Skipping FIFO for non-positive expense amount:', convertedAmount);
+            const updatedTrips = (s.trips || []).map(t => {
+                if (t.id !== incoming.tripId) return t;
+
+                const updatedWallets = (t.wallets || []).map(w => {
+                    if (w.id !== incoming.walletId) return w;
+
+                    try {
+                        const convertedAmount = safeNum(mergedExpense.convertedAmountTrip || mergedExpense.amount);
+                        if (convertedAmount <= 0) {
+                            console.warn('[Realtime] Skipping FIFO for non-positive expense amount:', convertedAmount);
+                            return w;
+                        }
+
+                        let preWallet = w;
+                        if (local && local.lotBreakdown) {
+                            preWallet = { ...w, lots: reverseFIFO(w, local) };
+                        }
+
+                        const { updatedWallet, breakdown } = applyExpenseFIFO(preWallet as any, convertedAmount);
+
+                        lotBreakdownToSave = breakdown;
+                        return { ...w, lots: updatedWallet.lots };
+                    } catch (e) {
+                        console.error('[Realtime] Sync FIFO failed:', e);
                         return w;
                     }
+                });
 
-                    let preWallet = w;
-                    if (local && local.lotBreakdown) {
-                        preWallet = { ...w, lots: reverseFIFO(w, local) };
-                    }
-
-                    const { updatedWallet, breakdown } = applyExpenseFIFO(preWallet as any, convertedAmount);
-                    
-                    lotBreakdownToSave = breakdown;
-                    return { ...w, lots: updatedWallet.lots };
-                } catch (e) {
-                    console.error('[Realtime] Sync FIFO failed:', e);
-                    return w;
-                }
+                return { ...t, wallets: recomputeWalletSpent(updatedWallets, updatedExpenses) };
             });
 
-            return { ...t, wallets: recomputeWalletSpent(updatedWallets, updatedExpenses) };
-        });
+            if (lotBreakdownToSave) mergedExpense.lotBreakdown = lotBreakdownToSave;
 
-        if (lotBreakdownToSave) mergedExpense.lotBreakdown = lotBreakdownToSave;
-
-        const updatedActivities = activityId
-            ? (s.activities || []).map(a => {
-                if (a.id !== activityId) return a;
+            const updatedActivities = (s.activities || []).map(a => {
+                if (activityId && a.id !== activityId) return a;
+                if (!activityId) return a;
                 const existingExpenses = a.expenses || [];
                 const existsInActivity = existingExpenses.some(e => e.id === incoming.id);
                 return {
@@ -361,14 +408,17 @@ function applyExpenseChange(payload: any) {
                         ? existingExpenses.map(e => e.id === incoming.id ? mergedExpense : e)
                         : [...existingExpenses, mergedExpense],
                 };
-            })
-            : (s.activities || []);
+            });
 
-        return {
-            expenses: updatedExpenses,
-            activities: updatedActivities,
-            trips: updatedTrips
-        };
+            return {
+                expenses: updatedExpenses,
+                activities: updatedActivities,
+                trips: updatedTrips
+            };
+        } catch (err) {
+            console.error('[Realtime] applyExpenseChange crash prevented:', err);
+            return s;
+        }
     });
 
     console.log(`[Realtime] Expense ${incoming.id} updated`);
@@ -656,15 +706,43 @@ export const useRealtimeSync = () => {
         };
     }, []);
 
-    // Cleanup all channels on unmount
+    // ─── Auto-subscribe to ALL trips for always-on realtime ────────
+    // Derive a stable key from trip IDs so we only re-run when trips are added/removed
+    const tripIdKey = useMemo(
+        () => trips.map(t => t.id).sort().join(','),
+        [trips]
+    );
+
     useEffect(() => {
+        if (!tripIdKey) return;
+        const ids = tripIdKey.split(',');
+
+        // Subscribe to any trip we're not yet tracking
+        for (const id of ids) {
+            if (!channels.current[id]) {
+                subscribeToTrip(id);
+            }
+        }
+
+        // Unsubscribe from trips that were removed
+        const idSet = new Set(ids);
+        for (const existingId of Object.keys(channels.current)) {
+            if (!idSet.has(existingId)) {
+                supabase.removeChannel(channels.current[existingId]);
+                delete channels.current[existingId];
+            }
+        }
+    }, [tripIdKey, subscribeToTrip]);
+
+    // Cleanup all channels on unmount
+    useMountEffect(() => {
         return () => {
             for (const id of Object.keys(channels.current)) {
                 supabase.removeChannel(channels.current[id]);
             }
             channels.current = {};
         };
-    }, []);
+    });
 
     return { subscribeToTrip, sendDeleteRequest, sendDeleteRequestCancelled };
 };

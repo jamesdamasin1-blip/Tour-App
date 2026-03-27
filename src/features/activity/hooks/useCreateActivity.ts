@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import dayjs from 'dayjs';
 import { useStore } from '../../../store/useStore';
@@ -80,23 +80,25 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
     const [showStartTimePicker, setShowStartTimePicker] = useState(false);
     const [showEndTimePicker, setShowEndTimePicker] = useState(false);
 
-    // Initialize state if editing
-    useEffect(() => {
-        if (editingActivity) {
-            setTitle(editingActivity.title);
-            setAllocatedBudget((editingActivity.allocatedBudget || 0).toString());
-            setBudgetCurrency(editingActivity.budgetCurrency || tripCurrency);
-            setSelectedCountries(editingActivity.countries || []);
-            setCategory(editingActivity.category);
-            setDate(dayjs(editingActivity.date));
-            setStartTime(dayjs(editingActivity.time));
-            setEndTime(dayjs(editingActivity.endTime || editingActivity.time + 3600000));
-            setDescription(editingActivity.description || '');
-            setActualCurrency(tripCurrency);
-        } else if (currentTrip) {
-            setSelectedCountries(currentTrip.countries || []);
-        }
-    }, [editingActivity, currentTrip]);
+    // Initialize form state once when editing — uses a ref guard so that sync
+    // updates to the same activity never overwrite the user's in-progress edits.
+    const initRef = useRef<string | null>(null);
+    if (editingActivity && initRef.current !== editingActivity.id) {
+        initRef.current = editingActivity.id;
+        setTitle(editingActivity.title);
+        setAllocatedBudget((editingActivity.allocatedBudget || 0).toString());
+        setBudgetCurrency(editingActivity.budgetCurrency || tripCurrency);
+        setSelectedCountries(editingActivity.countries || []);
+        setCategory(editingActivity.category);
+        setDate(dayjs(editingActivity.date));
+        setStartTime(dayjs(editingActivity.time));
+        setEndTime(dayjs(editingActivity.endTime || editingActivity.time + 3600000));
+        setDescription(editingActivity.description || '');
+        setActualCurrency(tripCurrency);
+    } else if (!editingActivity && currentTrip && initRef.current !== currentTrip.id) {
+        initRef.current = currentTrip.id;
+        setSelectedCountries(currentTrip.countries || []);
+    }
 
     // Dynamic calculation of actual cost in selected currency
     const calculatedTotalSpent = useMemo(() => {
@@ -118,12 +120,33 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
         }, 0);
     }, [editingActivity?.expenses, actualCurrency, tripCurrency, homeCurrency, effectiveRate]);
 
-    // Update actualCost input when currency changes or expenses change
-    useEffect(() => {
+    // Initialize actualCost once from calculated total — uses same ref guard
+    // so sync updates never overwrite the user's typed value.
+    const costInitRef = useRef(false);
+    if (editingActivity && !costInitRef.current && calculatedTotalSpent > 0) {
+        costInitRef.current = true;
+        setActualCost(calculatedTotalSpent.toFixed(2));
+    }
+
+    // When the user explicitly changes currency, recalculate displayed cost.
+    // Wrapped in a handler so it only fires on user action, not on sync.
+    const handleActualCurrencyChange = (newCurrency: string) => {
+        setActualCurrency(newCurrency);
         if (editingActivity) {
-            setActualCost(calculatedTotalSpent > 0 ? calculatedTotalSpent.toFixed(2) : '');
+            // Recalculate using the new currency selection
+            const recalc = (editingActivity.expenses || []).reduce((sum, exp) => {
+                if (newCurrency === tripCurrency) {
+                    return sum + (exp.convertedAmountTrip || exp.amount);
+                }
+                if (newCurrency === homeCurrency) {
+                    return sum + (exp.convertedAmountHome || (exp.amount / (effectiveRate || 1)));
+                }
+                if (exp.currency === newCurrency) return sum + exp.amount;
+                return sum;
+            }, 0);
+            setActualCost(recalc > 0 ? recalc.toFixed(2) : '');
         }
-    }, [actualCurrency, calculatedTotalSpent]);
+    };
 
     const handleSave = () => {
         if (!isAdmin) return;
@@ -206,6 +229,7 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
                         originalAmount: diff,
                         originalCurrency: actualCurrency,
                         createdBy: currentMemberId || undefined,
+                        version: 1,
                     });
                 } else if (diff < -0.01) {
                     // User reduced cost: replace ALL existing expenses with a single new one
@@ -236,6 +260,7 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
                         originalAmount: numericActualCost,
                         originalCurrency: actualCurrency,
                         createdBy: currentMemberId || undefined,
+                        version: 1,
                     }];
                 }
             }
@@ -264,7 +289,7 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
         category, setCategory,
         description, setDescription,
         budgetCurrency, setBudgetCurrency,
-        actualCurrency, setActualCurrency,
+        actualCurrency, setActualCurrency: handleActualCurrencyChange,
         selectedCountries, setSelectedCountries,
         date, setDate,
         startTime, setStartTime,

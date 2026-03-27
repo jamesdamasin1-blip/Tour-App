@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
     Modal, 
     View, 
@@ -43,7 +43,12 @@ export const AddExchangeModal = ({ tripId, visible, onClose, editingEvent }: Add
     const [rate, setRate] = useState('');
     const [notes, setNotes] = useState('');
 
-    useEffect(() => {
+    // Initialize form from editing event or default wallet — ref guard
+    // prevents re-initializing when external state changes during editing.
+    const editInitRef = useRef<string | null>(null);
+    const editKey = editingEvent?.id ?? 'new';
+    if (visible && editInitRef.current !== editKey) {
+        editInitRef.current = editKey;
         if (editingEvent) {
             setSelectedWalletId(editingEvent.walletId);
             setHomeAmount(MathUtils.formatCurrencyInput(editingEvent.homeAmount.toString()));
@@ -53,7 +58,11 @@ export const AddExchangeModal = ({ tripId, visible, onClose, editingEvent }: Add
         } else if (walletsStats.length > 0 && !selectedWalletId) {
             setSelectedWalletId(walletsStats[0].walletId);
         }
-    }, [editingEvent, walletsStats]);
+    }
+    // Reset ref when modal closes so it re-initializes on next open
+    if (!visible && editInitRef.current !== null) {
+        editInitRef.current = null;
+    }
 
     const activeWallet = useMemo(() => 
         walletsStats.find(w => w.walletId === selectedWalletId) || walletsStats[0],
@@ -63,23 +72,25 @@ export const AddExchangeModal = ({ tripId, visible, onClose, editingEvent }: Add
     const tripCurrency = activeWallet?.currency || '';
 
 
-    useEffect(() => {
-        const h = parseFloat(homeAmount.replace(/,/g, ''));
-        const t = parseFloat(tripAmount.replace(/,/g, ''));
-        if (h > 0 && t > 0) {
-            setRate((h / t).toFixed(4));
-        }
-    }, [homeAmount, tripAmount]);
-
     const parsedHome = parseFloat(homeAmount.replace(/,/g, '')) || 0;
     const parsedTrip = parseFloat(tripAmount.replace(/,/g, '')) || 0;
-    const parsedRate = parseFloat(rate) || 0;
     const hasValidAmounts = parsedHome > 0 && parsedTrip > 0;
+
+    // Derive rate from amounts — pure computation, no effect needed.
+    // Falls back to manually-set rate when amounts aren't both valid.
+    const displayRate = useMemo(() => {
+        if (parsedHome > 0 && parsedTrip > 0) {
+            return (parsedHome / parsedTrip).toFixed(4);
+        }
+        return rate;
+    }, [parsedHome, parsedTrip, rate]);
+
+    const parsedRate = parseFloat(displayRate) || 0;
 
     const handleSave = () => {
         const h = parsedHome;
         const t = parsedTrip;
-        const r = parsedRate || CurrencyConversionService.calculateRate(h, t);
+        const r = parsedRate > 0 ? parsedRate : CurrencyConversionService.calculateRate(h, t);
 
         if (!selectedWalletId) { alert('Please select a wallet'); return; }
         if (h <= 0 || t <= 0) { alert('Please enter valid amounts'); return; }
@@ -99,7 +110,8 @@ export const AddExchangeModal = ({ tripId, visible, onClose, editingEvent }: Add
                 tripAmount: t,
                 rate: r,
                 date: Date.now(),
-                notes: notes.trim()
+                notes: notes.trim(),
+                version: 1,
             });
         }
 
@@ -231,7 +243,7 @@ export const AddExchangeModal = ({ tripId, visible, onClose, editingEvent }: Add
                                         </View>
                                         <View className="flex-1">
                                             <Text className={`text-[8px] font-black uppercase opacity-60 tracking-[1px] ${isDark ? 'text-[#B2C4AA]' : 'text-[#5D6D54]'}`}>Calculated Conversion Rate</Text>
-                                            <Text className={`font-black text-sm ${isDark ? 'text-white' : 'text-[#2D342B]'}`}>1 {tripCurrency} = {rate} {homeCurrency}</Text>
+                                            <Text className={`font-black text-sm ${isDark ? 'text-white' : 'text-[#2D342B]'}`}>1 {tripCurrency} = {displayRate} {homeCurrency}</Text>
                                         </View>
                                     </View>
                                 </View>

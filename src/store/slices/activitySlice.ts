@@ -56,7 +56,7 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
                     const defaultLot = expWallet ? getDefaultLot(expWallet as any) : undefined;
                     const lockedRate: number = defaultLot?.lockedRate ?? (expWallet as any)?.baselineExchangeRate ?? 1;
 
-                    const expenseCurrency = exp.currency || expWallet?.currency || trip?.tripCurrency || 'MYR';
+                    const expenseCurrency = exp.currency || expWallet?.currency || trip?.tripCurrency || trip?.homeCurrency || 'PHP';
                     const convertedAmountTrip = exp.amount;
                     const convertedAmountHome = Math.round(convertedAmountTrip * lockedRate * 100) / 100;
 
@@ -79,6 +79,14 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
 
             offlineSync.activityUpdate(id, updated);
             if (activityData.expenses) {
+                // Soft-delete OLD expenses from DB so they don't accumulate on other devices after sync.
+                // Without this, old rows persist in Supabase and pull-sync returns both old + new,
+                // causing cost to show as sum of all versions (e.g. 17k + 15k = 32k).
+                const oldExpenseIds = new Set(finalExpenses.map((e: any) => e.id));
+                activity.expenses
+                    .filter(e => !oldExpenseIds.has(e.id))
+                    .forEach(e => offlineSync.expenseDelete(e.id));
+
                 finalExpenses.forEach((e: any) => offlineSync.expense(e));
             }
 
@@ -127,8 +135,11 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
                 wallets = recomputeWalletSpent(wallets, updatedExpenses);
 
                 // Sync updated wallet state so collaborators receive FIFO-updated lots via realtime.
+                // Also bump the trip row so pull-based sync picks up the updated wallet state.
                 if (activityData.expenses) {
                     wallets.forEach(w => offlineSync.walletUpdate(w.id, w));
+                    const tripForSync = { ...t, lastModified, wallets };
+                    offlineSync.tripUpdate(t.id, tripForSync);
                 }
 
                 return { ...t, lastModified, wallets };

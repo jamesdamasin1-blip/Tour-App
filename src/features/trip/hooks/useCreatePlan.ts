@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import dayjs from 'dayjs';
 import { useStore } from '@/src/store/useStore';
@@ -35,85 +35,56 @@ export const useCreatePlan = () => {
     const [countriesError, setCountriesError] = useState(false);
     const [budgetErrors, setBudgetErrors] = useState<string[]>([]);
 
-    // Update home currency when home country changes
-    useEffect(() => {
-        if (!homeCountry) {
-            setHomeCurrency('');
-            return;
-        }
-        const currency = COUNTRY_CURRENCY_MAPPING[homeCountry] || 'PHP';
-        setHomeCurrency(currency);
-        
-        // Remove from trip countries if it was selected there
-        setCountries(prev => prev.filter(c => c !== homeCountry));
-    }, [homeCountry]);
+    // Initialize form when editing — ref guard prevents re-init on sync
+    const editInitRef = useRef<string | null>(null);
+    if (isEditing && editId && editInitRef.current !== editId) {
+        const trip = trips.find(t => t.id === editId);
+        if (trip) {
+            editInitRef.current = editId;
+            setTitle(trip.title);
+            setHomeCountry(trip.homeCountry || 'Philippines');
+            setHomeCurrency(COUNTRY_CURRENCY_MAPPING[trip.homeCountry || 'Philippines'] || 'PHP');
+            setStartDate(dayjs(trip.startDate));
+            setEndDate(dayjs(trip.endDate));
+            setCountries(trip.countries || []);
 
-    // Initialize budgets and rates when countries change
-    useEffect(() => {
+            const budgets: { [c: string]: string } = {};
+            const homeBudgets: { [c: string]: string } = {};
+            const rates: { [c: string]: string } = {};
+            trip.wallets?.forEach(w => {
+                budgets[w.country] = MathUtils.formatCurrencyInput(w.totalBudget.toString());
+                const rateToHome = w.baselineExchangeRate || (1 / (w.defaultRate || 1));
+                const homeVal = w.totalBudget * rateToHome;
+                homeBudgets[w.country] = MathUtils.formatCurrencyInput(homeVal.toFixed(2));
+                rates[w.country] = (w.defaultRate || 1).toString();
+            });
+            setWalletBudgets(budgets);
+            setWalletHomeBudgets(homeBudgets);
+            setWalletRates(rates);
+        }
+    }
+
+    // Sync wallet budget/rate maps when countries change — helper used by event handlers
+    const syncBudgetMaps = (newCountries: string[]) => {
         setWalletBudgets(prev => {
             const next = { ...prev };
-            countries.forEach(c => {
-                if (!next[c]) next[c] = '';
-            });
-            // Cleanup removed countries
-            Object.keys(next).forEach(k => {
-                if (!countries.includes(k)) delete next[k];
-            });
+            newCountries.forEach(c => { if (!next[c]) next[c] = ''; });
+            Object.keys(next).forEach(k => { if (!newCountries.includes(k)) delete next[k]; });
             return next;
         });
-
         setWalletHomeBudgets(prev => {
             const next = { ...prev };
-            countries.forEach(c => {
-                if (!next[c]) next[c] = '';
-            });
-            // Cleanup removed countries
-            Object.keys(next).forEach(k => {
-                if (!countries.includes(k)) delete next[k];
-            });
+            newCountries.forEach(c => { if (!next[c]) next[c] = ''; });
+            Object.keys(next).forEach(k => { if (!newCountries.includes(k)) delete next[k]; });
             return next;
         });
-
         setWalletRates(prev => {
             const next = { ...prev };
-            countries.forEach(c => {
-                if (!next[c]) next[c] = '1';
-            });
-            // Cleanup removed countries
-            Object.keys(next).forEach(k => {
-                if (!countries.includes(k)) delete next[k];
-            });
+            newCountries.forEach(c => { if (!next[c]) next[c] = '1'; });
+            Object.keys(next).forEach(k => { if (!newCountries.includes(k)) delete next[k]; });
             return next;
         });
-    }, [countries]);
-
-    useEffect(() => {
-        if (isEditing && editId) {
-            const trip = trips.find(t => t.id === editId);
-            if (trip) {
-                setTitle(trip.title);
-                setHomeCountry(trip.homeCountry || 'Philippines');
-                setStartDate(dayjs(trip.startDate));
-                setEndDate(dayjs(trip.endDate));
-                setCountries(trip.countries || []);
-                
-                const budgets: { [c: string]: string } = {};
-                const homeBudgets: { [c: string]: string } = {};
-                const rates: { [c: string]: string } = {};
-                trip.wallets?.forEach(w => {
-                    budgets[w.country] = MathUtils.formatCurrencyInput(w.totalBudget.toString());
-                    // Multiplier standard: 1 TripCurrency = X HomeCurrency
-                    const rateToHome = w.baselineExchangeRate || (1 / (w.defaultRate || 1));
-                    const homeVal = w.totalBudget * rateToHome;
-                    homeBudgets[w.country] = MathUtils.formatCurrencyInput(homeVal.toFixed(2));
-                    rates[w.country] = (w.defaultRate || 1).toString();
-                });
-                setWalletBudgets(budgets);
-                setWalletHomeBudgets(homeBudgets);
-                setWalletRates(rates);
-            }
-        }
-    }, [isEditing, editId, trips]);
+    };
 
     const handleStart = () => {
         let hasError = false;
@@ -239,7 +210,26 @@ export const useCreatePlan = () => {
             isDark, isEditing, validationMessage, titleError, homeCountryError, durationError, countriesError, budgetErrors
         },
         actions: {
-            setTitle, setHomeCountry, setStartDate, setEndDate, setCountries,
+            setTitle,
+            setHomeCountry: (country: string) => {
+                setHomeCountry(country);
+                if (!country) {
+                    setHomeCurrency('');
+                } else {
+                    setHomeCurrency(COUNTRY_CURRENCY_MAPPING[country] || 'PHP');
+                    // Remove from trip countries if it was selected there
+                    setCountries(prev => {
+                        const filtered = prev.filter(c => c !== country);
+                        syncBudgetMaps(filtered);
+                        return filtered;
+                    });
+                }
+            },
+            setStartDate, setEndDate,
+            setCountries: (newCountries: string[]) => {
+                setCountries(newCountries);
+                syncBudgetMaps(newCountries);
+            },
             setWalletBudgets: (country: string, val: string) => setWalletBudgets(prev => ({ ...prev, [country]: val })),
             setWalletHomeBudgets: (country: string, val: string) => setWalletHomeBudgets(prev => ({ ...prev, [country]: val })),
             setWalletRates: (country: string, val: string) => setWalletRates(prev => ({ ...prev, [country]: val })),
