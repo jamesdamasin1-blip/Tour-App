@@ -1,9 +1,10 @@
 import { Feather } from '@expo/vector-icons';
-import React, { useState } from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
-import { BlurView } from 'expo-blur';
+import React, { useState, useRef } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useStore } from '../src/store/useStore';
 import { GlassView } from './GlassView';
+import { AnimatedModal, StepTransition } from './AnimatedModal';
+import { PressableScale } from './PressableScale';
 
 interface JoinTripModalProps {
     visible: boolean;
@@ -22,6 +23,9 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({
     const isDark = theme === 'dark';
     const [mode, setMode] = useState<'CHOICE' | 'INPUT'>('CHOICE');
     const [code, setCode] = useState('');
+    const prevMode = useRef(mode);
+    const stepDirection = mode === 'INPUT' ? 'forward' : 'backward' as const;
+    if (prevMode.current !== mode) prevMode.current = mode;
 
     const handleClose = () => {
         setMode('CHOICE');
@@ -37,31 +41,11 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({
     };
 
     return (
-        <Modal
-            transparent
-            visible={visible}
-            animationType="fade"
-            onRequestClose={handleClose}
-        >
-            <KeyboardAvoidingView 
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.overlay}
-            >
-                <TouchableOpacity 
-                    activeOpacity={1} 
-                    style={StyleSheet.absoluteFill} 
-                    onPress={handleClose}
-                >
-                    <BlurView intensity={40} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
-                    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
-                </TouchableOpacity>
-
-                <View style={styles.modalContent}>
+        <AnimatedModal visible={visible} onClose={handleClose}>
                     <GlassView
                         intensity={isDark ? 50 : 80}
                         borderRadius={32}
                         backgroundColor={isDark ? "rgba(40, 44, 38, 0.95)" : "rgba(255, 255, 255, 0.9)"}
-                        borderColor={isDark ? "rgba(158, 178, 148, 0.15)" : "rgba(255, 255, 255, 0.4)"}
                         style={styles.glass}
                     >
                         <View style={styles.header}>
@@ -71,6 +55,7 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({
                             </Text>
                         </View>
 
+                        <StepTransition stepKey={mode} direction={stepDirection}>
                         {mode === 'CHOICE' ? (
                             <View style={styles.optionsContainer}>
                                 <TouchableOpacity 
@@ -120,33 +105,32 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({
                                 </View>
 
                                 <View style={styles.actionRow}>
-                                    <TouchableOpacity 
+                                    <PressableScale
                                         style={[styles.secondaryBtn, isDark && { backgroundColor: '#3A3F37' }]}
                                         onPress={() => setMode('CHOICE')}
                                     >
                                         <Text style={[styles.secondaryBtnText, isDark && { color: '#9EB294' }]}>BACK</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity 
+                                    </PressableScale>
+                                    <PressableScale
                                         style={[styles.primaryBtn, { opacity: code.trim() ? 1 : 0.5 }]}
                                         onPress={handleJoin}
                                         disabled={!code.trim()}
                                     >
                                         <Text style={styles.primaryBtnText}>JOIN NOW</Text>
-                                    </TouchableOpacity>
+                                    </PressableScale>
                                 </View>
                             </View>
                         )}
+                        </StepTransition>
 
-                        <TouchableOpacity 
+                        <PressableScale 
                             style={[styles.closeFullBtn, isDark ? styles.closeDark : styles.closeLight]} 
                             onPress={handleClose}
                         >
                             <Text style={[styles.closeFullText, isDark && { color: '#9EB294' }]}>CLOSE</Text>
-                        </TouchableOpacity>
+                        </PressableScale>
                     </GlassView>
-                </View>
-            </KeyboardAvoidingView>
-        </Modal>
+        </AnimatedModal>
     );
 };
 

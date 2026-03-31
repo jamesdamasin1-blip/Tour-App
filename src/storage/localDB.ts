@@ -28,7 +28,7 @@ const VALID_COLUMNS = new Set([
     'id', 'data', 'syncStatus', 'createdAt', 'updatedAt',
     'userId', 'deviceId', 'tripId', 'walletId', 'activityId',
     'type', 'table_name', 'recordId', 'payload', 'timestamp',
-    'retryCount', 'status', 'key', 'value',
+    'retryCount', 'status', 'key', 'value', 'isHidden'
 ]);
 
 const assertValidTable = (table: string) => {
@@ -56,10 +56,18 @@ export const initializeDB = () => {
             userId TEXT,
             deviceId TEXT,
             syncStatus TEXT DEFAULT 'pending',
+            isHidden INTEGER DEFAULT 0,
             createdAt INTEGER NOT NULL,
             updatedAt INTEGER NOT NULL
         );
+    `);
 
+    // Schema updates: 
+    try {
+        db.execSync(`ALTER TABLE trips ADD COLUMN isHidden INTEGER DEFAULT 0;`);
+    } catch {}
+
+    db.execSync(`
         CREATE TABLE IF NOT EXISTS wallets (
             id TEXT PRIMARY KEY,
             tripId TEXT NOT NULL,
@@ -155,9 +163,13 @@ export const getAllRecords = <T>(table: string, whereColumn?: string, params?: a
     assertValidTable(table);
     const db = getDB();
     let sql = `SELECT data FROM ${table}`;
+    const baseWhere = table === 'trips' ? 'isHidden = 0' : '1=1';
+
     if (whereColumn) {
         assertValidColumns([whereColumn]);
-        sql += ` WHERE ${whereColumn} = ?`;
+        sql += ` WHERE ${baseWhere} AND ${whereColumn} = ?`;
+    } else {
+        sql += ` WHERE ${baseWhere}`;
     }
     const rows = db.getAllSync<{ data: string }>(sql, params || []);
     return rows.map(r => JSON.parse(r.data));

@@ -20,3 +20,8 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         detectSessionInUrl: false,
     },
 });
+
+// Debug: log all Supabase auth events at the client level
+supabase.auth.onAuthStateChange((event, session) => {
+    console.log(`[Supabase.auth] event="${event}" hasSession=${!!session} userId=${session?.user?.id ?? 'null'} expiresAt=${session?.expires_at ?? 'n/a'}`);
+});

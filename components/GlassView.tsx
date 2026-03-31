@@ -105,12 +105,13 @@ export const GlassView: React.FC<GlassViewProps> = ({
         bottom,
         left,
         right,
+        alignSelf: _alignSelf,
         ...otherStyles
     } = flatStyle as any;
 
     const layoutStyle = {
         margin, marginHorizontal, marginVertical, marginTop, marginBottom, marginLeft, marginRight,
-        flex, flexGrow, flexShrink, width, height, minWidth, minHeight, maxWidth, maxHeight,
+        flex, flexGrow, flexShrink, alignSelf: _alignSelf, width, height, minWidth, minHeight, maxWidth, maxHeight,
         position, top, bottom, left, right
     };
 

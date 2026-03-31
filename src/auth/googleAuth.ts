@@ -38,10 +38,17 @@ export const getAuthState = async (): Promise<AuthState> => {
     try {
         const { data: { session }, error } = await supabase.auth.getSession();
 
-        // Handle expired/invalid refresh token — clear stale session
+        // Handle session errors — only sign out for permanent auth failures,
+        // NOT for transient network errors or token-refresh races.
         if (error) {
-            console.warn('[Auth] Session error, clearing stale session:', error.message);
-            await supabase.auth.signOut().catch(() => {});
+            const msg = error.message?.toLowerCase() ?? '';
+            const isPermanent = msg.includes('refresh token') || msg.includes('invalid') || msg.includes('expired');
+            if (isPermanent) {
+                console.warn('[Auth] Permanent session error, clearing session:', error.message);
+                await supabase.auth.signOut().catch(() => {});
+            } else {
+                console.warn('[Auth] Transient session error (not signing out):', error.message);
+            }
             return {
                 userId: null,
                 email: null,
@@ -63,10 +70,9 @@ export const getAuthState = async (): Promise<AuthState> => {
             };
         }
     } catch (err: any) {
-        // Catch network errors, invalid token errors, etc.
+        // Catch network errors — do NOT sign out, as this destroys a valid session
+        // during transient failures (e.g., token refresh race, network blip).
         console.warn('[Auth] Failed to get session, treating as anonymous:', err?.message);
-        // Try to sign out to clear corrupted token state
-        await supabase.auth.signOut().catch(() => {});
     }
 
     return {
@@ -206,7 +212,11 @@ export const signOut = async (clearLocalData = false): Promise<AuthState> => {
 export const onAuthStateChange = (
     callback: (state: AuthState) => void
 ): (() => void) => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log(`[Auth] onAuthStateChange event="${event}" hasSession=${!!session} userId=${session?.user?.id ?? 'null'}`);
+        if (event === 'SIGNED_OUT') {
+            console.warn('[Auth] ⚠ SIGNED_OUT event fired — member will be logged out. Stack:', new Error().stack);
+        }
         const deviceId = getDeviceId();
         if (session?.user) {
             callback({
@@ -218,6 +228,7 @@ export const onAuthStateChange = (
                 deviceId,
             });
         } else {
+            console.warn(`[Auth] ⚠ No session in auth change event="${event}" — setting unauthenticated`);
             callback({
                 userId: null,
                 email: null,

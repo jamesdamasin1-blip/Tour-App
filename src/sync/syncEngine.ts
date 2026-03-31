@@ -13,113 +13,62 @@ import { getAuthState, type AuthState } from '../auth/googleAuth';
 import { getDB, getSyncMeta, markSynced, setSyncMeta } from '../storage/localDB';
 import { supabase } from '../utils/supabase';
 import { getPendingEvents, getRetryableEvents, markDone, markFailed, markProcessing, pruneCompletedEvents } from './syncQueue';
+import { mapTripFromDb, mapTripToDb } from '../mappers/trip.mapper';
+import { mapActivityFromDb, mapActivityToDb } from '../mappers/activity.mapper';
+import { mapExpenseFromDb, mapExpenseToDb } from '../mappers/expense.mapper';
+import { mapWalletToDb, mapFundingLotToDb } from '../mappers/wallet.mapper';
 
 type SyncStatus = 'idle' | 'syncing' | 'error';
 
 let _syncStatus: SyncStatus = 'idle';
 let _syncTimer: ReturnType<typeof setTimeout> | null = null;
 let _syncRunning = false; // guard against concurrent sync runs
+let _syncRequested = false; // flag to trigger another run after current completes
 const SYNC_INTERVAL = 8_000; // 8 seconds — fast enough for near-real-time fallback
 
 export const getSyncStatus = () => _syncStatus;
 
-// ─── Column Mappers (camelCase → snake_case per table) ────────────
+/**
+ * Push-only sync — pushes pending local changes to Supabase without pulling.
+ * Used for immediate cross-device sync after local edits.
+ */
+export const pushNow = async (): Promise<number> => {
+    if (_syncRunning) {
+        _syncRequested = true;
+        return 0;
+    }
 
-const mapTripToSupabase = (data: any) => ({
-    id: data.id,
-    title: data.title,
-    destination: data.destination,
-    start_date: data.startDate,
-    end_date: data.endDate,
-    home_country: data.homeCountry,
-    home_currency: data.homeCurrency,
-    wallets: data.wallets,
-    total_budget_home_cached: data.totalBudgetHomeCached,
-    spontaneous_events: data.spontaneousEvents || [],
-    countries: data.countries,
-    members: data.members,
-    removed_member_user_ids: data.removedMemberUserIds || [],
-    is_completed: data.isCompleted,
-    last_modified: data.lastModified,
-    field_updates: data.fieldUpdates,
-});
+    const auth = await getAuthState();
+    if (!auth.isAuthenticated || !auth.userId) return 0;
 
-const mapActivityToSupabase = (data: any) => ({
-    id: data.id,
-    trip_id: data.tripId,
-    wallet_id: data.walletId,
-    title: data.title,
-    category: data.category,
-    date: data.date,
-    time: data.time,
-    end_time: data.endTime,
-    allocated_budget: data.allocatedBudget,
-    budget_currency: data.budgetCurrency,
-    is_completed: data.isCompleted,
-    is_spontaneous: data.isSpontaneous === true,
-    last_modified: data.lastModified,
-    description: data.description,
-    location: data.location,
-    countries: data.countries,
-    created_by: data.createdBy,
-    last_modified_by: data.lastModifiedBy,
-    field_updates: data.fieldUpdates,
-});
+    _syncRunning = true;
+    let pushedTotal = 0;
+    try {
+        do {
+            _syncRequested = false;
+            const pushed = await pushPendingChanges(auth);
+            pushedTotal += pushed;
+            if (pushed > 0) pruneCompletedEvents();
+        } while (_syncRequested);
+    } catch (err) {
+        console.error('[SyncEngine] pushNow failed:', err);
+    } finally {
+        _syncRunning = false;
+    }
+    return pushedTotal;
+};
 
-const mapExpenseToSupabase = (data: any) => ({
-    id: data.id,
-    trip_id: data.tripId,
-    activity_id: data.activityId,
-    wallet_id: data.walletId,
-    name: data.name,
-    amount: data.amount,
-    currency: data.currency,
-    converted_amount_home: data.convertedAmountHome,
-    converted_amount_trip: data.convertedAmountTrip,
-    category: data.category,
-    time: data.time,
-    date: data.date,
-    original_amount: data.originalAmount,
-    original_currency: data.originalCurrency,
-    created_by: data.createdBy,
-    last_modified_by: data.lastModifiedBy,
-    field_updates: data.fieldUpdates,
-});
+// ─── Column Mappers (delegated to mappers/) ───────────────────────
 
-const mapWalletToSupabase = (data: any) => ({
-    id: data.id,
-    trip_id: data.tripId,
-    currency: data.currency,
-    total_budget: data.totalBudget,
-    spent_amount: data.spentAmount,
-    lots: data.lots,
-    baseline_exchange_rate: data.baselineExchangeRate,
-    default_rate: data.defaultRate,
-    field_updates: data.fieldUpdates,
-});
-
-const mapFundingLotToSupabase = (data: any) => ({
-    id: data.id,
-    wallet_id: data.walletId,
-    trip_id: data.tripId,
-    source_currency: data.sourceCurrency || 'PHP',
-    target_currency: data.targetCurrency,
-    source_amount: data.homeAmount ?? data.sourceAmount,
-    rate: data.rate,
-    notes: data.notes,
-    created_at: data.date ?? data.createdAt,
-    field_updates: data.fieldUpdates,
-});
-
-/** Map local payload to Supabase-ready columns */
+/** Map local payload to Supabase-ready columns (camelCase → snake_case). */
 const mapToSupabase = (tableName: string, data: any): Record<string, any> => {
     switch (tableName) {
-        case 'trips': return mapTripToSupabase(data);
-        case 'activities': return mapActivityToSupabase(data);
-        case 'expenses': return mapExpenseToSupabase(data);
-        case 'wallets': return mapWalletToSupabase(data);
-        case 'funding_lots': return mapFundingLotToSupabase(data);
-        default: return data;
+        case 'trips':        return mapTripToDb(data);
+        case 'activities':   return mapActivityToDb(data);
+        case 'expenses':     return mapExpenseToDb(data);
+        case 'wallets':      return mapWalletToDb(data);
+        case 'funding_lots': return mapFundingLotToDb(data);
+        default:             return data;
     }
 };
 
@@ -127,29 +76,42 @@ const mapToSupabase = (tableName: string, data: any): Record<string, any> => {
 
 /** Main sync loop — called when online and authenticated */
 export const runSync = async (): Promise<{ pushed: number; pulled: number }> => {
-    // Prevent concurrent sync runs
+    // If a sync is already running, just mark that we want another one after.
+    // This handles the race condition where a mutation happens while we are pulling remote updates.
     if (_syncRunning) {
-        console.log('[SyncEngine] Skipped — sync already in progress');
+        _syncRequested = true;
+        console.log('[SyncEngine] Queued follow-up sync');
         return { pushed: 0, pulled: 0 };
     }
-
-    const auth = await getAuthState();
-    if (!auth.isAuthenticated || !auth.userId) {
-        console.log('[SyncEngine] Skipped — not authenticated');
-        return { pushed: 0, pulled: 0 };
-    }
-
+    
     _syncRunning = true;
     _syncStatus = 'syncing';
-    let pushed = 0;
-    let pulled = 0;
+    let pushedTotal = 0;
+    let pulledTotal = 0;
 
     try {
-        pushed = await pushPendingChanges(auth);
-        pulled = await pullRemoteUpdates(auth);
-        pruneCompletedEvents();
-        _syncStatus = 'idle';
-        console.log(`[SyncEngine] Done — pushed=${pushed}, pulled=${pulled}`);
+        const auth = await getAuthState();
+        if (!auth.isAuthenticated || !auth.userId) {
+            console.log('[SyncEngine] Skipped — not authenticated');
+            return { pushed: 0, pulled: 0 };
+        }
+
+        // Keep running as long as new requests come in during the active cycle
+        do {
+            _syncRequested = false;
+            
+            const pushed = await pushPendingChanges(auth);
+            const pulled = await pullRemoteUpdates(auth);
+            
+            pushedTotal += pushed;
+            pulledTotal += pulled;
+            
+            if (pushed > 0) pruneCompletedEvents();
+            
+            _syncStatus = 'idle';
+        } while (_syncRequested);
+        
+        console.log(`[SyncEngine] Done — totalPushed=${pushedTotal}, totalPulled=${pulledTotal}`);
     } catch (err) {
         console.error('[SyncEngine] Sync failed:', err);
         _syncStatus = 'error';
@@ -157,14 +119,16 @@ export const runSync = async (): Promise<{ pushed: number; pulled: number }> => 
         _syncRunning = false;
     }
 
-    return { pushed, pulled };
+    return { pushed: pushedTotal, pulled: pulledTotal };
 };
 
 /** Push all pending events to Supabase — SOFT DELETE ONLY */
 const pushPendingChanges = async (auth: AuthState): Promise<number> => {
     const events = [...getPendingEvents(), ...getRetryableEvents()];
     if (events.length > 0) {
-        console.log(`[SyncEngine] Pushing ${events.length} events...`);
+        const pending = getPendingEvents().length;
+        const failed = getRetryableEvents().length;
+        console.log(`[SyncEngine] Pushing ${events.length} events... (Pending: ${pending}, Retrying: ${failed})`);
     }
     let pushed = 0;
 
@@ -197,7 +161,11 @@ const pushPendingChanges = async (auth: AuthState): Promise<number> => {
                     upsertPayload.user_id = auth.userId;
                 }
 
+                // ⏱ T1: about to hit Supabase
+                const t1 = Date.now();
+                console.log(`[SYNC_TIMING] T1_PUSH_START ${event.table_name}/${event.recordId} t=${t1}`);
                 const { error } = await supabase.from(table).upsert(upsertPayload);
+                console.log(`[SYNC_TIMING] T1_PUSH_DONE ${event.table_name}/${event.recordId} elapsed=${Date.now() - t1}ms`);
                 if (error) throw error;
             }
 
@@ -205,8 +173,10 @@ const pushPendingChanges = async (auth: AuthState): Promise<number> => {
             markDone(event.id);
             markSynced(event.table_name, event.recordId);
             pushed++;
-        } catch (err) {
-            console.error(`[SyncEngine] Push FAILED ${event.type} ${event.table_name}/${event.recordId}:`, err);
+        } catch (err: any) {
+            console.error(`[SyncEngine] Push FAILED ${event.type} ${event.table_name}/${event.recordId}:`, 
+                err?.message || err, 
+                err?.details || '');
             markFailed(event.id);
         }
     }
@@ -219,6 +189,7 @@ type OnRemoteUpdateFn = (data: {
     trips?: any[];
     activities?: any[];
     expenses?: any[];
+    wallets?: any[];
     sharedTripIds?: string[];
     currentUserId?: string;
     /** IDs of records that were soft-deleted on the server */
@@ -232,98 +203,29 @@ let _onRemoteUpdate: OnRemoteUpdateFn | null = null;
 /** Register a callback that updates the Zustand store after a pull. */
 export const onRemoteUpdate = (cb: OnRemoteUpdateFn) => { _onRemoteUpdate = cb; };
 
-// ─── snake_case → camelCase mappers for pulled data ───────────────
-
-const mapTripFromSupabase = (r: any) => ({
-    id: r.id,
-    userId: r.user_id || undefined,
-    title: r.title,
-    destination: r.destination,
-    startDate: Number(r.start_date),
-    endDate: Number(r.end_date),
-    homeCountry: r.home_country,
-    homeCurrency: r.home_currency,
-    wallets: r.wallets || [],
-    totalBudgetHomeCached: Number(r.total_budget_home_cached || 0),
-    tripCurrency: r.wallets?.[0]?.currency || r.home_currency,
-    totalBudgetTrip: r.wallets?.[0]?.totalBudget || 0,
-    totalBudget: (r.wallets || []).reduce(
-        (acc: number, w: any) => acc + (w.totalBudget / (w.defaultRate || 1)), 0
-    ),
-    currency: r.wallets?.[0]?.currency || r.home_currency,
-    countries: r.countries || [],
-    members: r.members || [],
-    isCompleted: r.is_completed || false,
-    lastModified: Number(r.last_modified || Date.now()),
-    isCloudSynced: true,
-    version: Number(r.version || 1),
-    updatedBy: r.updated_by || undefined,
-    deletedAt: r.deleted_at || null,
-    spontaneousEvents: r.spontaneous_events || [],
-});
-
-const mapActivityFromSupabase = (a: any) => ({
-    id: a.id,
-    tripId: a.trip_id,
-    walletId: a.wallet_id,
-    title: a.title,
-    category: a.category,
-    date: Number(a.date),
-    time: Number(a.time),
-    endTime: a.end_time ? Number(a.end_time) : undefined,
-    allocatedBudget: Number(a.allocated_budget),
-    budgetCurrency: a.budget_currency || 'PHP',
-    isCompleted: a.is_completed,
-    isSpontaneous: a.is_spontaneous || false,
-    lastModified: Number(a.last_modified),
-    description: a.description,
-    location: a.location,
-    countries: a.countries || [],
-    createdBy: a.created_by,
-    lastModifiedBy: a.last_modified_by,
-    expenses: [] as any[],
-    version: Number(a.version || 1),
-    updatedBy: a.updated_by || undefined,
-    deletedAt: a.deleted_at || null,
-});
-
-const mapExpenseFromSupabase = (e: any) => ({
-    id: e.id,
-    tripId: e.trip_id,
-    walletId: e.wallet_id,
-    activityId: e.activity_id,
-    name: e.name,
-    amount: Number(e.amount),
-    currency: e.currency,
-    convertedAmountHome: Number(e.converted_amount_home),
-    convertedAmountTrip: Number(e.converted_amount_trip),
-    category: e.category,
-    time: Number(e.time),
-    date: Number(e.date),
-    originalAmount: e.original_amount ? Number(e.original_amount) : undefined,
-    originalCurrency: e.original_currency,
-    createdBy: e.created_by,
-    lastModifiedBy: e.last_modified_by,
-    version: Number(e.version || 1),
-    updatedBy: e.updated_by || undefined,
-    deletedAt: e.deleted_at || null,
-});
+// ─── Pull-side mappers (snake_case → camelCase, delegated to mappers/) ──────
+// mapTripFromDb, mapActivityFromDb, mapExpenseFromDb are imported at top of file.
 
 /** Pull remote changes — version-aware, soft-delete aware */
 const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
     const lastSync = getSyncMeta('lastPullTimestamp');
-    // Convert legacy Unix-ms timestamps to ISO strings for correct PostgreSQL comparison
+    // updated_at is bigint (Unix ms) — compare with Unix ms, not ISO strings.
     let since: string | null = null;
     if (lastSync) {
         const asNum = Number(lastSync);
         if (!isNaN(asNum) && asNum > 1_000_000_000_000) {
-            // Legacy Unix ms — convert to ISO
-            since = new Date(asNum).toISOString();
+            // Already Unix ms
+            since = String(asNum);
         } else if (lastSync.includes('T') || lastSync.includes('-')) {
-            // Already an ISO string
-            since = lastSync;
+            // Legacy ISO string — convert to Unix ms for bigint comparison
+            since = String(new Date(lastSync).getTime());
         }
         // else: invalid — treat as first sync (since stays null)
+    }
+
+    // Add 1s clock-skew buffer to ensure we don't miss records committed slightly before the last pull
+    if (since) {
+        since = String(Number(since) - 1000);
     }
     let pulled = 0;
 
@@ -345,7 +247,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
 
     if (remoteTrips?.length) {
         for (const remote of remoteTrips) {
-            pulledTrips.push(mapTripFromSupabase(remote));
+            pulledTrips.push(mapTripFromDb(remote));
             pulled++;
         }
     }
@@ -395,7 +297,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
 
         if (remoteActivities) {
             for (const remote of remoteActivities) {
-                pulledActivities.push(mapActivityFromSupabase(remote));
+                pulledActivities.push({ ...mapActivityFromDb(remote), expenses: [] });
             }
             pulled += remoteActivities.length;
         }
@@ -427,7 +329,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
 
         if (remoteExpenses) {
             for (const remote of remoteExpenses) {
-                pulledExpenses.push(mapExpenseFromSupabase(remote));
+                pulledExpenses.push(mapExpenseFromDb(remote));
             }
             pulled += remoteExpenses.length;
         }
@@ -449,14 +351,31 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
         }
     }
 
-    console.log(`[SyncEngine] Pulled ${pulledActivities.length} activities, ${pulledExpenses.length} expenses, soft-deleted: ${deletedActivityIds.length} act / ${deletedExpenseIds.length} exp`);
+    // ── Pull wallets — authoritative for FIFO lot state ─────
+    let pulledWallets: any[] = [];
+    if (allTripIds.length > 0) {
+        const { data: remoteWallets, error: walErr } = await supabase
+            .from('wallets')
+            .select('*')
+            .is('deleted_at', null)
+            .in('trip_id', allTripIds);
+
+        if (walErr) console.error('[SyncEngine] Wallet pull error:', walErr.message);
+        if (remoteWallets?.length) {
+            pulledWallets = remoteWallets;
+            pulled += remoteWallets.length;
+        }
+    }
+
+    console.log(`[SyncEngine] Pulled ${pulledActivities.length} activities, ${pulledExpenses.length} expenses, ${pulledWallets.length} wallets, soft-deleted: ${deletedActivityIds.length} act / ${deletedExpenseIds.length} exp`);
 
     // ── Update Zustand store ──────────────────────────────────
     if (_onRemoteUpdate) {
         _onRemoteUpdate({
             trips: pulledTrips.length > 0 ? pulledTrips : undefined,
-            activities: pulledActivities,
-            expenses: pulledExpenses,
+            activities: pulledActivities.length > 0 ? pulledActivities : undefined,
+            expenses: pulledExpenses.length > 0 ? pulledExpenses : undefined,
+            wallets: pulledWallets.length > 0 ? pulledWallets : undefined,
             sharedTripIds: allTripIds,
             currentUserId: auth.userId!,
             deletedTripIds: deletedTripIds.length > 0 ? deletedTripIds : undefined,
@@ -467,7 +386,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
         console.warn('[SyncEngine] No onRemoteUpdate callback registered!');
     }
 
-    setSyncMeta('lastPullTimestamp', new Date().toISOString());
+    setSyncMeta('lastPullTimestamp', String(Date.now()));
     return pulled;
 };
 
@@ -496,5 +415,54 @@ export const stopSyncLoop = () => {
     if (_syncTimer) {
         clearInterval(_syncTimer);
         _syncTimer = null;
+    }
+};
+
+/**
+ * HARD REFETCH STRATEGY
+ * Fetch all activities and expenses for a trip directly from the DB.
+ * Bypasses the sync queue and immediately replaces local state, which then 
+ * recalculates the wallet total directly from this authoritative pull.
+ */
+export const refetchTripActivities = async (tripId: string): Promise<void> => {
+    const auth = await getAuthState();
+    if (!auth.isAuthenticated || !auth.userId) return;
+
+    // Fetch activities
+    const { data: remoteActivities, error: actErr } = await supabase
+        .from('activities')
+        .select('*')
+        .is('deleted_at', null)
+        .eq('trip_id', tripId);
+        
+    if (actErr) {
+        console.error('[SyncEngine] refetchTripActivities pull activities error:', actErr.message);
+        return;
+    }
+
+    // Fetch expenses
+    const { data: remoteExpenses, error: expErr } = await supabase
+        .from('expenses')
+        .select('*')
+        .is('deleted_at', null)
+        .eq('trip_id', tripId);
+
+    if (expErr) {
+        console.error('[SyncEngine] refetchTripActivities pull expenses error:', expErr.message);
+        return;
+    }
+
+    const pulledActivities = (remoteActivities || []).map(a => ({ ...mapActivityFromDb(a), expenses: [] }));
+    const pulledExpenses = (remoteExpenses || []).map(mapExpenseFromDb);
+
+    if (_onRemoteUpdate) {
+        _onRemoteUpdate({
+            activities: pulledActivities,
+            expenses: pulledExpenses,
+            sharedTripIds: [tripId], // Safe now, scoping isolates the eviction
+            currentUserId: auth.userId,
+        });
+    } else {
+        console.warn('[SyncEngine] Cannot refetch, _onRemoteUpdate is missing');
     }
 };

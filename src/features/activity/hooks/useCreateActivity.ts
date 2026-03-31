@@ -6,7 +6,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { Calculations as MathUtils } from '../../../utils/mathUtils';
 import { useTripWallet } from '../../trip/hooks/useTripWallet';
-import { Activity } from '../../../types/models';
+import { Expense } from '../../../types/models';
 
 export const useCreateActivity = (tripId: string, activityId?: string) => {
     const router = useRouter();
@@ -14,7 +14,6 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
     const activities = useStore(state => state.activities);
     const addActivity = useStore(state => state.addActivity);
     const updateActivity = useStore(state => state.updateActivity);
-    const currencyRates = useStore(state => state.currencyRates);
     const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
@@ -192,6 +191,41 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
             lastModifiedBy: currentMemberId || undefined,
         };
 
+        const buildActualExpense = (expenseActivityId?: string): Expense | null => {
+            const numericActualCost = actualCost.trim() !== '' ? MathUtils.parseCurrencyInput(actualCost) : null;
+            if (numericActualCost === null || numericActualCost <= 0) return null;
+
+            let amountInTrip = numericActualCost;
+            let amountInHome = numericActualCost;
+            if (actualCurrency === homeCurrency) {
+                amountInTrip = numericActualCost / (effectiveRate || 1);
+                amountInHome = numericActualCost;
+            } else {
+                amountInTrip = numericActualCost;
+                amountInHome = numericActualCost * (effectiveRate || 1);
+            }
+
+            return {
+                id: MathUtils.generateId(),
+                tripId,
+                walletId: walletId || '',
+                activityId: expenseActivityId,
+                name: title.trim() || 'Manual Entry',
+                category: category as any,
+                amount: amountInTrip,
+                currency: activeWallet?.currency || tripCurrency,
+                convertedAmountHome: amountInHome,
+                convertedAmountTrip: amountInTrip,
+                date: date!.valueOf(),
+                time: Date.now(),
+                originalAmount: numericActualCost,
+                originalCurrency: actualCurrency,
+                createdBy: currentMemberId || undefined,
+                lastModifiedBy: currentMemberId || undefined,
+                version: 1,
+            };
+        };
+
         if (activityId) {
             let finalExpenses = editingActivity ? [...editingActivity.expenses] : [];
             const numericActualCost = actualCost.trim() !== '' ? MathUtils.parseCurrencyInput(actualCost) : null;
@@ -218,8 +252,8 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
                         tripId,
                         walletId: walletId || '',
                         activityId: activityId || '',
-                        name: 'Manual Adjustment',
-                        category: 'Other',
+                        name: editingActivity?.title || 'Cost Adjustment',
+                        category: (editingActivity?.category as any) || 'Other',
                         amount: amountInTrip,
                         currency: activeWallet?.currency || tripCurrency,
                         convertedAmountHome: amountInHome,
@@ -267,6 +301,10 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
             activityData.expenses = finalExpenses;
             updateActivity(activityId, activityData);
         } else {
+            const initialExpense = buildActualExpense();
+            if (initialExpense) {
+                activityData.expenses = [initialExpense];
+            }
             addActivity(activityData);
         }
 
@@ -311,6 +349,9 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
         availableCurrencies: [tripCurrency, homeCurrency].filter(Boolean),
         totalWalletBalanceHome, totalExchangedHome,
         tripMembers, currentMemberId,
+
+        // Derived
+        hasExpenses: (editingActivity?.expenses?.length ?? 0) > 0,
 
         // Actions
         handleSave, toggleCountry

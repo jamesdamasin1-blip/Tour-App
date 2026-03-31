@@ -53,7 +53,7 @@ export const ActivitiesSection = React.memo(({
     return (
         <View>
             {/* Static header */}
-            <View style={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 10 }}>
+            <View style={{ paddingHorizontal: 24, paddingTop: 4, paddingBottom: 10 }}>
                 <Text style={{ fontSize: 11, fontWeight: '900', color: isDark ? '#9EB294' : '#6B7280', letterSpacing: 2, textTransform: 'uppercase' }}>
                     ACTIVITIES
                 </Text>

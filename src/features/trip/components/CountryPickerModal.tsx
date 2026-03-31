@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { GlassView } from '@/components/GlassView';
 import { COUNTRIES } from '@/src/data/countries';
+import { AnimatedModal } from '@/components/AnimatedModal';
+import { PressableScale } from '@/components/PressableScale';
 
 interface CountryPickerModalProps {
     visible: boolean;
@@ -22,10 +23,8 @@ export const CountryPickerModal = ({ visible, onClose, selectedCountries, onTogg
     );
 
     return (
-        <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-            <TouchableOpacity activeOpacity={1} onPress={onClose} className="flex-1 justify-end">
-                <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
+        <AnimatedModal visible={visible} onClose={onClose} origin="bottom">
+            <View className="flex-1 justify-end">
                 <GlassView
                     intensity={isDark ? 80 : 95}
                     borderRadius={32}
@@ -86,11 +85,11 @@ export const CountryPickerModal = ({ visible, onClose, selectedCountries, onTogg
                         </View>
                     </ScrollView>
 
-                    <TouchableOpacity onPress={onClose} className="mt-4 py-4 bg-[#5D6D54] rounded-2xl items-center shadow-sm">
+                    <PressableScale onPress={onClose} className="mt-4 py-4 bg-[#5D6D54] rounded-2xl items-center shadow-sm">
                         <Text className="text-white font-black uppercase tracking-widest text-[14px]">Done</Text>
-                    </TouchableOpacity>
+                    </PressableScale>
                 </GlassView>
-            </TouchableOpacity>
-        </Modal>
+            </View>
+        </AnimatedModal>
     );
 };

@@ -60,3 +60,4 @@ test_nan.mjs
 emulator_local_db.db
 device1.png
 device2.png
+supabase/.temp/

@@ -15,6 +15,7 @@ interface ActivityFormFinanceProps {
     isDark: boolean;
     isAdmin: boolean;
     activityId?: string;
+    hasExpenses?: boolean;
     errors: Record<string, string>;
 }
 
@@ -26,12 +27,13 @@ export const ActivityFormFinance: React.FC<ActivityFormFinanceProps> = ({
     availableCurrencies,
     isDark, isAdmin,
     activityId,
+    hasExpenses = false,
     errors
 }) => {
     return (
         <View className="px-4 pb-4 mt-2">
             <Text className={`text-xs font-bold mb-3 uppercase tracking-widest opacity-60 ${isDark ? 'text-[#B2C4AA]' : 'text-[#5D6D54]'}`}>Finance</Text>
-            
+
             <CurrencyInput
                 label="Allocated Budget"
                 amount={allocatedBudget}
@@ -52,8 +54,12 @@ export const ActivityFormFinance: React.FC<ActivityFormFinanceProps> = ({
                         currency={actualCurrency}
                         onCurrencyChange={setActualCurrency}
                         options={availableCurrencies}
-                        editable={isAdmin}
-                        helperText="Editing this will create a manual adjustment expense to match the total."
+                        editable={isAdmin && hasExpenses}
+                        helperText={
+                            hasExpenses
+                                ? "Editing this will create a manual adjustment expense to match the total."
+                                : "Add an expense first to enable editing the actual cost."
+                        }
                     />
                 </View>
             )}

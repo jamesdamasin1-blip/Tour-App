@@ -16,7 +16,7 @@ export const TabBg: React.FC<TabBgProps> = ({ color }) => {
     
     const insets = useSafeAreaInsets();
     
-    const defaultColor = isDark ? 'rgba(40, 44, 38, 0.98)' : 'rgba(238, 236, 224, 0.92)';
+    const defaultColor = isDark ? '#1A1C18' : '#F2F0E8';
     const finalColor = color || defaultColor;
     // SVG Path calculation for smooth circular cutout using cubic beziers
     // Transition points: center-60 (start bend), center-35 (enter dip), center+35 (exit dip), center+60 (end bend)

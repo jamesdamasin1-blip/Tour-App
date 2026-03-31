@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import {
-    Modal,
     View,
     Text,
     TouchableOpacity,
@@ -12,7 +11,7 @@ import { GlassView } from '@/components/GlassView';
 import { Feather } from '@expo/vector-icons';
 import { useStore } from '@/src/store/useStore';
 import { AddExchangeModal } from './AddExchangeModal';
-import { BlurView } from 'expo-blur';
+import { AnimatedModal } from '@/components/AnimatedModal';
 import { ExchangeEvent, Expense, Activity } from '@/src/types/models';
 import { useTripWallet } from '../hooks/useTripWallet';
 import { Calculations as MathUtils } from '@/src/utils/mathUtils';
@@ -143,7 +142,9 @@ export const ExchangeHistoryModal = ({ tripId, visible, onClose }: ExchangeHisto
     }, [fullTimeline]);
 
     const spendingTimeline = useMemo(() => {
-        const filtered = fullTimeline.filter(e => e.type === 'expense');
+        const filtered = fullTimeline.filter(e =>
+            e.type === 'expense' && e.expense?.name !== 'Manual Adjustment'
+        );
         return groupByDate(filtered);
     }, [fullTimeline]);
 
@@ -154,14 +155,8 @@ export const ExchangeHistoryModal = ({ tripId, visible, onClose }: ExchangeHisto
 
     return (
         <>
-            <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+            <AnimatedModal visible={visible} onClose={onClose}>
                 <View style={styles.overlay}>
-                    <BlurView
-                        intensity={isDark ? 30 : 20}
-                        style={StyleSheet.absoluteFill}
-                        tint={isDark ? 'dark' : 'light'}
-                    />
-                    <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
 
                     <View style={styles.container}>
                         <GlassView
@@ -402,7 +397,7 @@ export const ExchangeHistoryModal = ({ tripId, visible, onClose }: ExchangeHisto
                         </GlassView>
                     </View>
                 </View>
-            </Modal>
+            </AnimatedModal>
 
             <AddExchangeModal
                 tripId={tripId}

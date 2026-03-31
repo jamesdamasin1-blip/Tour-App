@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Text, Modal } from 'react-native';
+import { RippleButton } from '../components/RippleButton';
 import { useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -46,6 +47,7 @@ export default function CreateActivityScreen() {
         // Data
         currentTrip,
         availableCurrencies,
+        hasExpenses,
     } = useCreateActivity(tripId, activityId);
 
 
@@ -107,21 +109,33 @@ export default function CreateActivityScreen() {
                             isDark={isDark}
                             isAdmin={isAdmin}
                             activityId={activityId}
+                            hasExpenses={hasExpenses}
                             errors={errors}
                         />
                     </GlassView>
 
                     {/* Button below the card */}
-                    <TouchableOpacity
+                    <RippleButton
                         onPress={handleSave}
-                        className="mt-6 h-16 rounded-3xl flex-row items-center justify-center shadow-lg"
-                        style={{ backgroundColor: isDark ? '#B2C4AA' : '#5D6D54' }}
+                        glowColor={isDark ? 'rgba(178, 196, 170, 0.5)' : 'rgba(93, 109, 84, 0.4)'}
+                        style={{
+                            marginTop: 24,
+                            height: 64,
+                            borderRadius: 24,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backgroundColor: isDark ? '#B2C4AA' : '#5D6D54',
+                            shadowColor: isDark ? '#B2C4AA' : '#5D6D54',
+                            shadowOffset: { width: 0, height: 6 },
+                            shadowOpacity: 0.25,
+                            shadowRadius: 12,
+                            elevation: 6,
+                        }}
                     >
                         <Text className={`font-black text-base tracking-[3px] uppercase ${isDark ? 'text-[#1A1C18]' : 'text-white'}`}>
                             {activityId ? 'UPDATE ACTIVITY' : 'CREATE ACTIVITY'}
                         </Text>
-                        <Feather name="arrow-right" size={20} color={isDark ? "#1A1C18" : "white"} style={{ marginLeft: 8 }} />
-                    </TouchableOpacity>
+                    </RippleButton>
                 </ScrollView>
             </KeyboardAvoidingView>
 

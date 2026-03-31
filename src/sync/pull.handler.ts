@@ -1,0 +1,304 @@
+/**
+ * PULL SYNC HANDLER
+ * Processes the result of pullRemoteUpdates(): merges pulled data into
+ * Zustand store with version-based conflict resolution and FIFO correction.
+ *
+ * This is the batch-pull mirror of sync/realtime/*.handler.ts.
+ * Register with: onRemoteUpdate(handlePullUpdate)
+ * [SYNC][MERGE][FIFO] prefixed logs for cross-device traceability.
+ */
+import { useStore } from '../store/useStore';
+import { reverseFIFO, recomputeWalletSpent } from '../store/storeHelpers';
+import { deleteRecord, upsertRecord } from '../storage/localDB';
+
+type PullPayload = {
+    trips?: any[]; activities?: any[]; expenses?: any[]; wallets?: any[];
+    sharedTripIds?: string[]; currentUserId?: string;
+    deletedTripIds?: string[]; deletedActivityIds?: string[]; deletedExpenseIds?: string[];
+};
+
+export function handlePullUpdate(data: PullPayload): void {
+    const { trips, activities, expenses, wallets, sharedTripIds,
+            deletedTripIds, deletedActivityIds, deletedExpenseIds } = data;
+    console.log(`[SYNC] Pull: trips=${trips?.length ?? 0} act=${activities?.length ?? 0} exp=${expenses?.length ?? 0} wal=${wallets?.length ?? 0}`);
+
+    applyDeletions(deletedTripIds, deletedActivityIds, deletedExpenseIds);
+    if (trips?.length)        applyTrips(trips);
+    if (wallets?.length)      applyWallets(wallets);
+    if (sharedTripIds?.length) {
+        if (activities) applyActivities(activities, sharedTripIds);
+        if (expenses)   applyExpenses(expenses, sharedTripIds);
+    }
+}
+
+function applyDeletions(tripIds?: string[], activityIds?: string[], expenseIds?: string[]): void {
+    if (tripIds?.length) {
+        useStore.setState(s => ({
+            trips:      s.trips.filter(t => !tripIds.includes(t.id)),
+            activities: s.activities.filter(a => !tripIds.includes(a.tripId)),
+            expenses:   s.expenses.filter(e => !tripIds.includes(e.tripId)),
+        }));
+        tripIds.forEach(id => deleteRecord('trips', id));
+    }
+
+    if (activityIds?.length) {
+        useStore.setState(s => ({ activities: s.activities.filter(a => !activityIds.includes(a.id)) }));
+        activityIds.forEach(id => deleteRecord('activities', id));
+    }
+
+    if (expenseIds?.length) {
+        useStore.setState(s => {
+            const del      = new Set(expenseIds);
+            const toReverse = s.expenses.filter(e => del.has(e.id));
+            const remaining = s.expenses.filter(e => !del.has(e.id));
+            const affected  = new Set(toReverse.map(e => e.tripId));
+
+            const updatedTrips = s.trips.map(t => {
+                if (!affected.has(t.id)) return t;
+                const forTrip = toReverse.filter(e => e.tripId === t.id);
+                let wallets = t.wallets.map((w: any) => {
+                    let lots = w.lots ?? [];
+                    for (const exp of forTrip.filter((e: any) => e.walletId === w.id))
+                        lots = reverseFIFO({ ...w, lots }, exp);
+                    return { ...w, lots };
+                });
+                const completedActivityIds = new Set(
+                    s.activities.filter(a => a.tripId === t.id && a.isCompleted).map(a => a.id)
+                );
+                const validRemaining = remaining.filter(e => 
+                    e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
+                );
+                wallets = recomputeWalletSpent(wallets, validRemaining);
+                return { ...t, wallets };
+            });
+            return {
+                expenses:   remaining,
+                activities: s.activities.map(a => ({ ...a, expenses: a.expenses.filter(e => !del.has(e.id)) })),
+                trips:      updatedTrips,
+            };
+        });
+        expenseIds.forEach(id => deleteRecord('expenses', id));
+    }
+}
+
+function applyTrips(remote: any[]): void {
+    useStore.setState(s => {
+        const updated = [...s.trips];
+        for (const r of remote) {
+            const idx = updated.findIndex(t => t.id === r.id);
+            if (idx >= 0) {
+                const local = updated[idx];
+                if ((r.version ?? 0) > (local.version ?? 0)) {
+                    // Merge wallets: use remote lots when remote wallet version is newer,
+                    // otherwise preserve local lots (authoritative for FIFO remainingAmount).
+                    const mergedWallets = (r.wallets ?? []).map((rw: any) => {
+                        const lw = (local.wallets ?? []).find((w: any) => w.id === rw.id);
+                        if (!lw) return rw;
+                        const remoteWins = (rw.version ?? 0) > (lw.version ?? 0);
+                        return remoteWins ? rw : { ...rw, lots: lw.lots };
+                    });
+                    updated[idx] = { ...local, ...r, wallets: mergedWallets };
+                    console.log(`[MERGE] Trip ${r.id} remote v${r.version} > local v${local.version}`);
+                }
+            } else {
+                updated.push(r);
+            }
+        }
+        return { trips: updated };
+    });
+}
+
+/** Apply pulled wallets into their parent trips — version-based merge.
+ *  The wallets table is the source of truth for FIFO lot state.
+ *  This replaces the fragile reverse-FIFO approach for cross-device sync. */
+function applyWallets(remoteWallets: any[]): void {
+    useStore.setState(s => {
+        const walletsByTrip = new Map<string, any[]>();
+        for (const rw of remoteWallets) {
+            const tripId = rw.trip_id;
+            if (!walletsByTrip.has(tripId)) walletsByTrip.set(tripId, []);
+            walletsByTrip.get(tripId)!.push(rw);
+        }
+
+        const updatedTrips = s.trips.map(t => {
+            const pulled = walletsByTrip.get(t.id);
+            if (!pulled) return t;
+
+            const updatedWallets = t.wallets.map(lw => {
+                const rw = pulled.find(w => w.id === lw.id);
+                if (!rw) return lw;
+                const remoteVersion = Number(rw.version ?? 0);
+                const localVersion = Number((lw as any).version ?? 0);
+                if (remoteVersion <= localVersion) return lw;
+
+                // Remote wallet is newer — take remote lots and fields,
+                // but preserve local-only fields (country, createdAt).
+                console.log(`[MERGE] Wallet ${lw.id} remote v${remoteVersion} > local v${localVersion}`);
+                return {
+                    ...lw,
+                    lots: rw.lots ?? lw.lots,
+                    spentAmount: rw.spent_amount ?? lw.spentAmount,
+                    totalBudget: rw.total_budget ?? lw.totalBudget,
+                    defaultRate: rw.default_rate ?? lw.defaultRate,
+                    baselineExchangeRate: rw.baseline_exchange_rate ?? lw.baselineExchangeRate,
+                    version: remoteVersion,
+                };
+            });
+
+            // Recompute wallet spent from the expense ledger for consistency
+            const completedActivityIds = new Set(
+                s.activities.filter(a => a.tripId === t.id && a.isCompleted).map(a => a.id)
+            );
+            const validExpenses = s.expenses.filter(e => 
+                e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
+            );
+            return { ...t, wallets: recomputeWalletSpent(updatedWallets, validExpenses) };
+        });
+
+        return { trips: updatedTrips };
+    });
+}
+
+function applyActivities(remote: any[], scopedTripIds?: string[]): void {
+    const state = useStore.getState();
+    const tripIds = new Set(scopedTripIds || state.trips.map(t => t.id));
+    const remoteFiltered = remote.filter(a => tripIds.has(a.tripId));
+    const remoteMap = new Map(remoteFiltered.map(a => [a.id, a]));
+
+    // Safety: if remote returned nothing but we have local activities, skip eviction.
+    // This prevents mass-deletion caused by server errors, RLS issues, or race conditions.
+    const localInScopeCount = state.activities.filter(a => tripIds.has(a.tripId)).length;
+    const skipEviction = remoteFiltered.length === 0 && localInScopeCount > 0;
+
+    if (skipEviction) {
+        console.warn(`[SYNC] Skipping activity eviction — remote returned 0 but ${localInScopeCount} local activities exist`);
+    }
+
+    // In a full sync of alive records, we should evict anything local that's missing from remote
+    // UNLESS it's a fresh local mutation (still in the sync_queue).
+    const { getDB } = require('../storage/localDB');
+    const db = getDB();
+    const pendingIds = new Set(
+        db.getAllSync('SELECT recordId FROM sync_queue WHERE status != "done" AND table_name = "activities"')
+          .map((r: any) => r.recordId)
+    );
+
+    useStore.setState(s => {
+        const localInScope = s.activities.filter(a => tripIds.has(a.tripId));
+        const merged = [];
+
+        // 1. Process remote records (merge/update)
+        for (const [id, r] of remoteMap) {
+            const local = localInScope.find(a => a.id === id);
+            const wins  = !local || (r.version ?? 0) >= (local.version ?? 0);
+
+            // Critical: preserve local expenses if remote doesn't carry them (which pull sync doesn't)
+            merged.push(wins ? { ...r, expenses: (local?.expenses ?? []) } : local);
+        }
+
+        // 2. Process local records missing from remote (evict if not pending, and only if eviction is safe)
+        for (const local of localInScope) {
+            if (!remoteMap.has(local.id)) {
+                if (skipEviction || pendingIds.has(local.id)) {
+                    // Keep it — either remote was empty (unsafe to evict) or it's a pending mutation
+                    if (pendingIds.has(local.id)) console.log(`[SYNC] Preserving pending activity ${local.id}`);
+                    merged.push(local);
+                } else {
+                    // Evict: it was deleted on server or unauthorized
+                    console.warn(`[SYNC] Evicting orphaned activity ${local.id} (not in server pull)`);
+                    deleteRecord('activities', local.id);
+                }
+            }
+        }
+
+        for (const a of merged as any[]) {
+            upsertRecord('activities', a.id, a, { tripId: a.tripId, walletId: a.walletId ?? '' });
+        }
+
+        const newActivities = [...s.activities.filter(a => !tripIds.has(a.tripId)), ...merged];
+
+        const updatedTrips = s.trips.map(t => {
+            if (!tripIds.has(t.id)) return t;
+
+            const completedActivityIds = new Set(
+                newActivities.filter(a => a.tripId === t.id && a.isCompleted).map(a => a.id)
+            );
+            const validExpenses = s.expenses.filter(e => 
+                e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
+            );
+
+            return { ...t, wallets: recomputeWalletSpent(t.wallets, validExpenses) };
+        });
+
+        return { activities: newActivities, trips: updatedTrips };
+    });
+}
+
+function applyExpenses(remote: any[], scopedTripIds?: string[]): void {
+    const state = useStore.getState();
+    const tripIds = new Set(scopedTripIds || state.trips.map(t => t.id));
+    const remoteFiltered = remote.filter(e => tripIds.has(e.tripId));
+    const remoteMap = new Map(remoteFiltered.map(e => [e.id, e]));
+
+    const localInScopeCount = state.expenses.filter(e => tripIds.has(e.tripId)).length;
+    const skipEviction = remoteFiltered.length === 0 && localInScopeCount > 0;
+
+    if (skipEviction) {
+        console.warn(`[SYNC] Skipping expense eviction — remote returned 0 but ${localInScopeCount} local expenses exist`);
+    }
+
+    const { getDB } = require('../storage/localDB');
+    const db = getDB();
+    const pendingIds = new Set(
+        db.getAllSync('SELECT recordId FROM sync_queue WHERE status != "done" AND table_name = "expenses"')
+          .map((r: any) => r.recordId)
+    );
+
+    useStore.setState(s => {
+        const localInScope = s.expenses.filter(e => tripIds.has(e.tripId));
+        const merged: any[] = [];
+
+        for (const [id, r] of remoteMap) {
+            const local = localInScope.find(e => e.id === id);
+            merged.push(!local || (r.version ?? 0) >= (local.version ?? 0) ? r : local);
+        }
+
+        for (const local of localInScope) {
+            if (!remoteMap.has(local.id)) {
+                if (skipEviction || pendingIds.has(local.id)) {
+                    if (pendingIds.has(local.id)) merged.push(local);
+                    else merged.push(local);
+                } else {
+                    console.warn(`[SYNC] Evicting orphaned expense ${local.id}`);
+                    deleteRecord('expenses', local.id);
+                }
+            }
+        }
+
+        for (const e of merged) upsertRecord('expenses', e.id, e, { tripId: e.tripId, walletId: e.walletId ?? '', activityId: e.activityId ?? '' });
+
+        const allExpenses = [...s.expenses.filter(e => !tripIds.has(e.tripId)), ...merged];
+        const updatedActivities = s.activities.map(a =>
+            tripIds.has(a.tripId) ? { ...a, expenses: allExpenses.filter(e => e.activityId === a.id) } : a
+        );
+
+        // Wallet lots are authoritative from the server (applyWallets runs before this).
+        // Do NOT apply FIFO here — it would double-count deductions on lots that already
+        // reflect these expenses. Only recompute spentAmount from the updated expense ledger.
+        const updatedTrips = s.trips.map(t => {
+            if (!tripIds.has(t.id)) return t;
+
+            // Only sum expenses that belong to COMPLETED activities, or lack an activity (spontaneous)
+            const completedActivityIds = new Set(
+                updatedActivities.filter(a => a.tripId === t.id && a.isCompleted).map(a => a.id)
+            );
+            const validExpenses = allExpenses.filter(e => 
+                e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
+            );
+
+            return { ...t, wallets: recomputeWalletSpent(t.wallets, validExpenses) };
+        });
+
+        return { expenses: allExpenses, activities: updatedActivities, trips: updatedTrips };
+    });
+}

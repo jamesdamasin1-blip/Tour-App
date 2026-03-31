@@ -1,8 +1,9 @@
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { GlassView } from '@/components/GlassView';
+import { AnimatedModal } from '@/components/AnimatedModal';
+import { PressableScale } from '@/components/PressableScale';
 
 interface ValidationModalProps {
     visible: boolean;
@@ -13,10 +14,8 @@ interface ValidationModalProps {
 
 export const ValidationModal = ({ visible, message, onClose, isDark }: ValidationModalProps) => {
     return (
-        <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
+        <AnimatedModal visible={visible} onClose={onClose}>
             <View className="flex-1 justify-center items-center px-6">
-                <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
                 <GlassView
                     intensity={isDark ? 80 : 85}
                     borderRadius={32}
@@ -34,13 +33,13 @@ export const ValidationModal = ({ visible, message, onClose, isDark }: Validatio
                             {message}
                         </Text>
                         <View className="flex-row gap-3 w-full">
-                            <TouchableOpacity onPress={onClose} className="flex-1 py-4 rounded-2xl bg-[#5D6D54]">
+                            <PressableScale onPress={onClose} className="flex-1 py-4 rounded-2xl bg-[#5D6D54]">
                                 <Text className="text-white font-bold text-center">GOT IT</Text>
-                            </TouchableOpacity>
+                            </PressableScale>
                         </View>
                     </View>
                 </GlassView>
             </View>
-        </Modal>
+        </AnimatedModal>
     );
 };

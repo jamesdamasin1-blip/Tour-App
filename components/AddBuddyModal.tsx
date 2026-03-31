@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, TextInput, FlatList, Share, Alert, ActivityIndicator, Image, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, TextInput, FlatList, Share, Alert, ActivityIndicator, Image, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { useStore } from '@/src/store/useStore';
 import { useAuth } from '@/src/hooks/useAuth';
 import { GlassView } from './GlassView';
+import { AnimatedModal, StepTransition } from './AnimatedModal';
+import { PressableScale } from './PressableScale';
+import { RippleButton } from './RippleButton';
 import QRCode from 'react-native-qrcode-svg';
 import { base64Encode } from '@/src/utils/base64';
 import { getFlagUrl } from '@/src/data/countryMapping';
@@ -13,27 +15,45 @@ interface AddBuddyModalProps {
     visible: boolean;
     onClose: () => void;
     onScanQR?: () => void;
+    initialTripId?: string;
+    initialStep?: Step;
+    hideBackButton?: boolean;
 }
 
 type Step = 'trip' | 'method' | 'qr' | 'code' | 'email';
 
-export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps) => {
+export const AddBuddyModal = ({ visible, onClose, onScanQR, initialTripId, initialStep, hideBackButton }: AddBuddyModalProps) => {
     const { theme, trips, activities, sendEmailInvite } = useStore();
     const { userId, email: userEmail, displayName, isAuthenticated } = useAuth();
     const isDark = theme === 'dark';
 
-    const [step, setStep] = useState<Step>('trip');
-    const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+    const [step, setStep] = useState<Step>(initialStep || 'trip');
+    const [selectedTripId, setSelectedTripId] = useState<string | null>(initialTripId || null);
     const [code, setCode] = useState('');
     const [email, setEmail] = useState('');
     const [error, setError] = useState('');
     const [isSendingInvite, setIsSendingInvite] = useState(false);
     const [inviteSent, setInviteSent] = useState(false);
     const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
+    const prevStep = useRef(step);
+    const stepDirection = (() => {
+        const order: Step[] = ['trip', 'method', 'qr', 'code', 'email'];
+        return order.indexOf(step) >= order.indexOf(prevStep.current) ? 'forward' : 'backward';
+    })() as 'forward' | 'backward';
+    if (prevStep.current !== step) prevStep.current = step;
+
+    useEffect(() => {
+        if (visible) {
+            setStep(initialStep || 'trip');
+            setSelectedTripId(initialTripId || null);
+            setInviteSent(false);
+            setError('');
+        }
+    }, [visible, initialStep, initialTripId]);
 
     const handleClose = () => {
-        setStep('trip');
-        setSelectedTripId(null);
+        setStep(initialStep || 'trip');
+        setSelectedTripId(initialTripId || null);
         setCode('');
         setEmail('');
         setError('');
@@ -137,7 +157,10 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
 
     const goBack = () => {
         if (step === 'qr' || step === 'code' || step === 'email') setStep('method');
-        else if (step === 'method') setStep('trip');
+        else if (step === 'method') {
+            if (initialTripId) handleClose();
+            else setStep('trip');
+        }
         else handleClose();
     };
 
@@ -152,29 +175,22 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
     };
 
     return (
-        <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
-            <View style={{ flex: 1 }}>
-                <BlurView intensity={isDark ? 40 : 20} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
-                <TouchableOpacity style={[StyleSheet.absoluteFill]} activeOpacity={1} onPress={handleClose} />
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }} pointerEvents="box-none">
-                <TouchableOpacity activeOpacity={1} onPress={() => {}} style={{ width: '100%', maxWidth: 380 }}>
+        <AnimatedModal visible={visible} onClose={handleClose}>
                     <GlassView
                         intensity={isDark ? 80 : 90}
                         borderRadius={36}
                         backgroundColor={isDark ? "rgba(30, 34, 28, 0.88)" : "rgba(255, 255, 255, 0.88)"}
-                        borderColor={isDark ? 'rgba(158,178,148,0.2)' : 'rgba(93,109,84,0.15)'}
                         style={{ width: '100%', padding: 24 }}
                     >
                         {/* Header */}
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                {step !== 'trip' && (
+                                {step !== 'trip' && !hideBackButton && (
                                     <TouchableOpacity onPress={goBack} style={{ marginRight: 10 }}>
                                         <Feather name="arrow-left" size={20} color={isDark ? '#B2C4AA' : '#5D6D54'} />
                                     </TouchableOpacity>
                                 )}
-                                <Text style={{ fontSize: step === 'trip' ? 13 : 16, fontWeight: '900', color: isDark ? '#F2F0E8' : '#111827', letterSpacing: 1.5, textTransform: 'uppercase' }}>
+                                <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#F2F0E8' : '#111827', letterSpacing: 1.5, textTransform: 'uppercase' }}>
                                     {getTitle()}
                                 </Text>
                             </View>
@@ -183,6 +199,7 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
                             </TouchableOpacity>
                         </View>
 
+                        <StepTransition stepKey={step} direction={stepDirection}>
                         {step === 'trip' && (
                             <View>
                                 {activeTrips.length === 0 ? (
@@ -242,7 +259,7 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
 
                             {step === 'method' && (
                                 <View>
-                                    <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '500', color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 16 }}>
                                         They must have the app installed. Choose how to invite them:
                                     </Text>
 
@@ -295,7 +312,7 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
 
                             {step === 'qr' && (
                                 <View style={{ alignItems: 'center' }}>
-                                    <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '500', color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 16 }}>
                                         Ask them to open the app and scan this QR from the "+" menu on their My Trips screen
                                     </Text>
                                     <View style={{
@@ -319,7 +336,7 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
                                         }}
                                     >
                                         <Feather name="share" size={14} color={isDark ? '#1A1C18' : '#fff'} style={{ marginRight: 6 }} />
-                                        <Text style={{ fontSize: 11, fontWeight: '800', color: isDark ? '#1A1C18' : '#fff', letterSpacing: 0.5 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: '900', color: isDark ? '#1A1C18' : '#fff', letterSpacing: 0.5 }}>
                                             ALSO SHARE AS TEXT
                                         </Text>
                                     </TouchableOpacity>
@@ -328,7 +345,7 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
 
                             {step === 'code' && (
                                 <View style={{ alignItems: 'center' }}>
-                                    <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '500', color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 16 }}>
                                         Share this invite code with them. They can paste it via the "+" menu on their My Trips screen.
                                     </Text>
                                     <TouchableOpacity
@@ -339,7 +356,7 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
                                         }}
                                     >
                                         <Feather name="share" size={16} color={isDark ? '#1A1C18' : '#fff'} />
-                                        <Text style={{ fontSize: 12, fontWeight: '900', letterSpacing: 1.5, color: isDark ? '#1A1C18' : '#fff', marginTop: 6 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: '900', letterSpacing: 1.5, color: isDark ? '#1A1C18' : '#fff', marginTop: 6 }}>
                                             SHARE INVITE CODE
                                         </Text>
                                     </TouchableOpacity>
@@ -387,7 +404,7 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
                                         </View>
                                     ) : (
                                         <>
-                                            <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 12 }}>
+                                            <Text style={{ fontSize: 13, fontWeight: '500', color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 12 }}>
                                                 Enter their email. They'll see the invite when they open the app.
                                             </Text>
                                             <TextInput
@@ -480,9 +497,10 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
                                                 </TouchableOpacity>
                                             </View>
 
-                                            <TouchableOpacity
+                                            <RippleButton
                                                 onPress={handleEmailInvite}
                                                 disabled={isSendingInvite}
+                                                glowColor={isDark ? 'rgba(178, 196, 170, 0.5)' : 'rgba(93, 109, 84, 0.4)'}
                                                 style={{
                                                     flexDirection: 'row',
                                                     paddingVertical: 14, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
@@ -493,21 +511,19 @@ export const AddBuddyModal = ({ visible, onClose, onScanQR }: AddBuddyModalProps
                                                 {isSendingInvite ? (
                                                     <ActivityIndicator size="small" color={isDark ? '#1A1C18' : '#fff'} />
                                                 ) : (
-                                                    <Text style={{ fontSize: 12, fontWeight: '900', letterSpacing: 1.5, color: isDark ? '#1A1C18' : '#fff' }}>
+                                                    <Text style={{ fontSize: 13, fontWeight: '900', letterSpacing: 1.5, color: isDark ? '#1A1C18' : '#fff' }}>
                                                         SEND INVITE
                                                     </Text>
                                                 )}
-                                            </TouchableOpacity>
+                                            </RippleButton>
                                         </>
                                     )}
                                 </View>
                             )}
+                        </StepTransition>
 
                     </GlassView>
-                </TouchableOpacity>
-            </View>
-            </View>
-        </Modal>
+        </AnimatedModal>
     );
 };
 

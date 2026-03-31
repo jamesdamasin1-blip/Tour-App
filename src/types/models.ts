@@ -21,6 +21,7 @@ export interface Wallet {
     deletedAt?: string | null; // ISO timestamp if soft-deleted, null if alive
     fieldUpdates?: Record<string, number>; // CRDT-lite field-level timestamp tracking
     lastDeviceId?: string; // Origin tracking to prevent self-echo overwrite
+    lastModified?: number; // Universal sync timestamp
 }
 
 export interface Expense {
@@ -43,6 +44,7 @@ export interface Expense {
     originalCurrency?: string; // Legacy
     createdBy?: string;      // member id
     lastModifiedBy?: string; // member id
+    lastModified?: number;
     // Sync fields
     version: number;         // Server-managed, monotonically increasing
     updatedBy?: string;      // Supabase auth user_id of last editor

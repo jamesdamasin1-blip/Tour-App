@@ -10,14 +10,14 @@ import { enqueueSync } from './syncQueue';
 import { upsertRecord, deleteRecord as deleteLocalRecord } from '../storage/localDB';
 import { runSync } from './syncEngine';
 
-/** Debounced immediate sync — coalesces rapid mutations into a single push */
+/** Debounced immediate sync — coalesces same-tick mutations, then syncs fast */
 let _syncTimeout: ReturnType<typeof setTimeout> | null = null;
 const debouncedSync = () => {
     if (_syncTimeout) clearTimeout(_syncTimeout);
     _syncTimeout = setTimeout(() => {
         _syncTimeout = null;
         runSync().catch(console.error);
-    }, 500);
+    }, 50);
 };
 
 type MutationType = 'INSERT' | 'UPDATE' | 'DELETE';
@@ -33,6 +33,9 @@ export const recordMutation = (
     data: Record<string, any>,
     extra: Record<string, any> = {}
 ) => {
+    // ⏱ T0: mutation enqueued
+    console.log(`[SYNC_TIMING] T0_ENQUEUE ${tableName}/${recordId} type=${type} t=${Date.now()}`);
+
     if (type === 'DELETE') {
         deleteLocalRecord(tableName, recordId);
     } else {
@@ -56,6 +59,10 @@ export const syncTrip = (tripData: any) => {
 
 export const syncTripUpdate = (tripId: string, tripData: any) => {
     recordMutation('UPDATE', 'trips', tripId, tripData);
+};
+
+export const syncTripHide = (tripId: string, tripData: any) => {
+    recordMutation('UPDATE', 'trips', tripId, tripData, { isHidden: 1 });
 };
 
 export const syncTripDelete = (tripId: string) => {

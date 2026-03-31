@@ -3,28 +3,31 @@ import { TabBg } from '@/components/TabBg';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Tabs, usePathname, useRouter } from 'expo-router';
-import React from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '@/src/store/useStore';
 import { useRealtimeSync } from '@/src/hooks/useRealtimeSync';
+import { AddBuddyModal } from '@/components/AddBuddyModal';
+import { GlassView } from '@/components/GlassView';
+import { AnimatedModal } from '@/components/AnimatedModal';
+import { PressableScale } from '@/components/PressableScale';
 
-function CustomTabBarButton() {
-    const router = useRouter();
-    const target = '/create-plan';
-
+function CustomTabBarButton({ onPress }: { onPress: () => void }) {
+    const pathname = usePathname();
+    if (pathname === '/analysis') return null;
     return (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'visible', zIndex: 1000, elevation: 1000 }}>
-            <TouchableOpacity
+            <PressableScale
                 testID="fab-add-trip"
                 style={{ alignItems: 'center', justifyContent: 'center', top: -44 }}
-                onPress={() => router.push(target as any)}
-                activeOpacity={0.8}
+                onPress={onPress}
+                activeScale={0.88}
             >
                 <View style={styles.fab}>
                     <Feather name="plus" size={36} color="#fff" />
                 </View>
-            </TouchableOpacity>
+            </PressableScale>
         </View>
     );
 }
@@ -33,9 +36,27 @@ export default function TabLayout() {
     const insets = useSafeAreaInsets();
     const { theme } = useStore();
     const isDark = theme === 'dark';
+    const router = useRouter();
 
-    // Realtime sync — only active when user is in the app (tabs are mounted)
+    const [isFabModalOpen, setIsFabModalOpen] = useState(false);
+    const [isAddBuddyOpen, setIsAddBuddyOpen] = useState(false);
+
     useRealtimeSync();
+
+    const fabActions = [
+        {
+            icon: 'plus' as const,
+            label: 'CREATE TRIP',
+            sub: 'Start planning a new adventure',
+            onPress: () => { setIsFabModalOpen(false); router.push('/create-plan' as any); },
+        },
+        {
+            icon: 'users' as const,
+            label: 'MANAGE MEMBERS',
+            sub: 'Invite someone to one of your trips',
+            onPress: () => { setIsFabModalOpen(false); setIsAddBuddyOpen(true); },
+        },
+    ];
 
     return (
         <View style={{ flex: 1, backgroundColor: isDark ? '#1A1C18' : '#F2F0E8' }}>
@@ -47,7 +68,6 @@ export default function TabLayout() {
                     tabBarShowLabel: false,
                     tabBarBackground: () => (
                         <View style={{ flex: 1 }}>
-                            {/* Gradient fade above the tab bar to prevent card overlap */}
                             <View pointerEvents="none" style={{ position: 'absolute', top: -50, left: 0, right: 0, height: 50, zIndex: 1 }}>
                                 <LinearGradient
                                     colors={[
@@ -73,9 +93,7 @@ export default function TabLayout() {
                         paddingTop: 0,
                         overflow: 'visible',
                     },
-                    tabBarIconStyle: {
-                        marginTop: 18, // Centering icons in 64px bar
-                    }
+                    tabBarIconStyle: { marginTop: 18 },
                 }}>
                 <Tabs.Screen
                     name="index"
@@ -86,11 +104,7 @@ export default function TabLayout() {
                 <Tabs.Screen
                     name="add"
                     options={{
-                        tabBarButton: () => {
-                            const pathname = usePathname();
-                            if (pathname === '/analysis') return null;
-                            return <CustomTabBarButton />;
-                        },
+                        tabBarButton: () => <CustomTabBarButton onPress={() => setIsFabModalOpen(true)} />,
                     }}
                 />
                 <Tabs.Screen
@@ -100,17 +114,75 @@ export default function TabLayout() {
                     }}
                 />
             </Tabs>
+
+            {/* FAB choice modal */}
+            <AnimatedModal visible={isFabModalOpen} onClose={() => setIsFabModalOpen(false)}>
+                        <GlassView
+                            intensity={isDark ? 80 : 100}
+                            borderRadius={32}
+                            backgroundColor={isDark ? 'rgba(30, 34, 28, 0.97)' : 'rgba(255, 255, 255, 0.98)'}
+                            style={{ width: '100%', padding: 24 }}
+                        >
+                            {fabActions.map((item, i) => (
+                                <PressableScale
+                                    key={item.label}
+                                    onPress={item.onPress}
+                                    style={[
+                                        styles.fabItem,
+                                        i < fabActions.length - 1 && {
+                                            borderBottomWidth: 1,
+                                            borderBottomColor: isDark ? 'rgba(158,178,148,0.1)' : 'rgba(0,0,0,0.06)',
+                                            marginBottom: 4,
+                                            paddingBottom: 20,
+                                        },
+                                    ]}
+                                >
+                                    <View style={[styles.fabItemIcon, {
+                                        backgroundColor: isDark ? 'rgba(178,196,170,0.12)' : 'rgba(93,109,84,0.08)',
+                                    }]}>
+                                        <Feather name={item.icon} size={22} color={isDark ? '#B2C4AA' : '#5D6D54'} />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{
+                                            fontSize: 18,
+                                            fontWeight: '900',
+                                            letterSpacing: -0.3,
+                                            textTransform: 'uppercase',
+                                            color: isDark ? '#F2F0E8' : '#111827',
+                                            marginBottom: 3,
+                                        }}>
+                                            {item.label}
+                                        </Text>
+                                        <Text style={{
+                                            fontSize: 13,
+                                            fontWeight: '500',
+                                            color: isDark ? '#9EB294' : 'rgba(93,109,84,0.8)',
+                                            lineHeight: 18,
+                                        }}>
+                                            {item.sub}
+                                        </Text>
+                                    </View>
+                                    <Feather name="chevron-right" size={20} color={isDark ? '#9EB294' : '#9CA3AF'} />
+                                </PressableScale>
+                            ))}
+                        </GlassView>
+            </AnimatedModal>
+
+            {/* AddBuddyModal — starts at trip picker */}
+            <AddBuddyModal
+                visible={isAddBuddyOpen}
+                onClose={() => setIsAddBuddyOpen(false)}
+            />
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-
     fab: {
-        width: 64, // w-16
-        height: 64, // h-16
+        width: 64,
+        height: 64,
         borderRadius: 32,
-        backgroundColor: '#5D6D54', // Darker Cambridge Blue (Solid)
+        backgroundColor: '#5D6D54',
         justifyContent: 'center',
         alignItems: 'center',
         shadowColor: '#5D6D54',
@@ -118,5 +190,18 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.3,
         shadowRadius: 15,
         elevation: 12,
-    }
+    },
+    fabItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 16,
+        gap: 16,
+    },
+    fabItemIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
 });

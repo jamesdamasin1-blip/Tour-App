@@ -85,15 +85,36 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, 
 
     deleteTrip: (id, fromSync) =>
         set((state) => {
+            const trip = state.trips.find(t => t.id === id);
+            if (!trip) return state;
+
             if (!fromSync) {
-                // Soft delete: enqueue DELETE events which the sync engine
-                // will convert to UPDATE deleted_at = now() on push
-                state.activities.filter(a => a.tripId === id).forEach(a => offlineSync.activityDelete(a.id));
-                state.expenses.filter(e => e.tripId === id).forEach(e => offlineSync.expenseDelete(e.id));
-                offlineSync.tripDelete(id);
+                // Determine if we're a member leaving or just hiding an owned trip
+                const isCreator = !trip.isCloudSynced || (state as any).userId === (trip as any).user_id;
+
+                if (!isCreator && trip.id) {
+                    // MEMBER LEAVING: Sync removal to server then hide locally
+                    const currentUserId = (state as any).userId;
+                    const updatedMembers = (trip.members || []).filter(m => m.userId !== currentUserId);
+                    const lastModified = Date.now();
+                    const updatedTrip = { 
+                        ...trip, 
+                        members: updatedMembers, 
+                        lastModified,
+                        fieldUpdates: stampFieldUpdates(trip.fieldUpdates, { members: updatedMembers }, lastModified)
+                    };
+                    
+                    // Push the member removal to server
+                    offlineSync.tripUpdate(id, updatedTrip);
+                    // Mark hidden locally in SQLite
+                    offlineSync.tripHide(id, updatedTrip);
+                } else {
+                    // CREATOR/OWNER HIDING: Just mark hidden locally in SQLite (never syncs)
+                    offlineSync.tripHide(id, trip);
+                }
             }
 
-            // Remove from local UI immediately (server uses soft delete)
+            // Remove from local UI immediately
             return {
                 trips: state.trips.filter(t => t.id !== id),
                 activities: state.activities.filter(a => a.tripId !== id),

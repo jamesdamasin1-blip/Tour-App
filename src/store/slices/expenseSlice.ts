@@ -3,7 +3,7 @@ import { Expense, ExpenseCategory, Wallet, Activity } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
 import { applyExpenseFIFO } from '../../finance/expense/expenseEngine';
 import { getDefaultLot } from '../../finance/wallet/walletEngine';
-import { offlineSync, reverseFIFO, recomputeWalletSpent, stampFieldUpdates } from '../storeHelpers';
+import { offlineSync, stampFieldUpdates } from '../storeHelpers';
 import type { AppState } from '../useStore';
 
 export interface ExpenseSlice {
@@ -30,17 +30,6 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
             const expenseAmount: number = (expenseData as any).amount || 0;
             const convertedAmountTrip: number = (expenseData as any).convertedAmountTrip ?? expenseAmount;
 
-            let updatedWallet;
-            let breakdown = [];
-            try {
-                const fifoResult = applyExpenseFIFO(wallet as any, convertedAmountTrip);
-                updatedWallet = fifoResult.updatedWallet;
-                breakdown = fifoResult.breakdown;
-            } catch (e: any) {
-                console.error('applyExpenseFIFO Failed:', e);
-                return state;
-            }
-
             const defaultLot = getDefaultLot(wallet as any);
             const lockedRate: number = defaultLot?.lockedRate ?? (wallet as any).baselineExchangeRate ?? 1;
 
@@ -56,7 +45,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 currency: expenseCurrency,
                 convertedAmountHome,
                 convertedAmountTrip,
-                lotBreakdown: breakdown,
+                lotBreakdown: [],
                 date: (expenseData as any).date || Date.now(),
                 time: (expenseData as any).time || Date.now(),
                 version: 1,
@@ -73,32 +62,13 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
 
             if (!fromSync) offlineSync.expense(newExpense);
 
-            const allExpensesAfterAdd = [...state.expenses, newExpense];
-
+            // Wallet is NOT affected here — wallet only changes when activity is marked COMPLETE.
             return {
-                expenses: allExpensesAfterAdd,
+                expenses: [...state.expenses, newExpense],
                 activities: updatedActivities,
-                trips: state.trips.map(t => {
-                    if (t.id === tripId) {
-                        const finalWallets = (t.wallets || []).map((w): Wallet => w.id === walletId ? {
-                            ...w,
-                            lots: updatedWallet.lots,
-                            spentAmount: allExpensesAfterAdd
-                                .filter(e => e.walletId === w.id)
-                                .reduce((sum, e) => sum + (e.convertedAmountTrip || 0), 0)
-                        } : w);
-
-                        const targetW = finalWallets.find(w => w.id === walletId);
-                        if (targetW && !fromSync) offlineSync.walletUpdate(walletId, targetW);
-
-                        return {
-                            ...t,
-                            lastModified,
-                            wallets: finalWallets
-                        };
-                    }
-                    return t;
-                })
+                trips: state.trips.map(t =>
+                    t.id === tripId ? { ...t, lastModified } : t
+                ),
             };
         }),
 
@@ -148,20 +118,13 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
 
             if (!fromSync) offlineSync.expenseUpdate(id, updatedExpense);
 
-            const updatedExpenses = state.expenses.map(e => e.id === id ? updatedExpense : e);
+            // Wallet is NOT affected here — wallet only changes when activity is marked COMPLETE.
             return {
-                expenses: updatedExpenses,
+                expenses: state.expenses.map(e => e.id === id ? updatedExpense : e),
                 activities: updatedActivities,
-                trips: state.trips.map(t => {
-                    if (t.id === expense.tripId) {
-                        return {
-                            ...t,
-                            lastModified,
-                            wallets: recomputeWalletSpent(t.wallets, updatedExpenses),
-                        };
-                    }
-                    return t;
-                })
+                trips: state.trips.map(t =>
+                    t.id === expense.tripId ? { ...t, lastModified } : t
+                ),
             };
         }),
 
@@ -171,7 +134,6 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
             if (!expense) return state;
 
             const lastModified = Date.now();
-            const trip = state.trips.find(t => t.id === expense.tripId);
 
             let updatedActivities = state.activities;
             if (expense.activityId) {
@@ -182,34 +144,15 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
 
             if (!fromSync) offlineSync.expenseDelete(id);
 
-            const expensesAfterDelete = state.expenses.filter(e => e.id !== id);
-
+            // Wallet is NOT affected here — wallet only changes when activity is marked COMPLETE.
+            // If deleting an expense from a COMPLETED activity, the activity must be reopened first
+            // (which reverses wallet), so no wallet logic needed here.
             return {
-                expenses: expensesAfterDelete,
+                expenses: state.expenses.filter(e => e.id !== id),
                 activities: updatedActivities,
-                trips: state.trips.map(t => {
-                    if (t.id === expense.tripId) {
-                        const restoredWallets: Wallet[] = t.wallets.map(w => {
-                            if (w.id === expense.walletId) {
-                                const linkedA = state.activities.find(a => a.id === expense.activityId);
-                                if (linkedA?.isSpontaneous) return w; // Skip credit-back for spontaneous items Node triggers
-                                return { ...w, lots: reverseFIFO(w, expense) };
-                            }
-                            return w;
-                        });
-                        const finalWallets = recomputeWalletSpent(restoredWallets, expensesAfterDelete);
-
-                        const targetW = finalWallets.find(w => w.id === expense.walletId);
-                        if (targetW && !fromSync) offlineSync.walletUpdate(expense.walletId, targetW);
-
-                        return {
-                            ...t,
-                            lastModified,
-                            wallets: finalWallets,
-                        };
-                    }
-                    return t;
-                })
+                trips: state.trips.map(t =>
+                    t.id === expense.tripId ? { ...t, lastModified } : t
+                ),
             };
         }),
 
@@ -292,13 +235,21 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 expenses: allExpensesAfterSpontaneous,
                 trips: state.trips.map(t => {
                     if (t.id === tripId) {
-                        const finalWallets = (t.wallets || []).map((w): Wallet => w.id === walletId ? {
-                            ...w,
-                            lots: updatedWallet.lots,
-                            spentAmount: allExpensesAfterSpontaneous
+                        const finalWallets = (t.wallets || []).map((w): Wallet => {
+                            if (w.id !== walletId) return w;
+                            const nextSpentAmount = allExpensesAfterSpontaneous
                                 .filter(e => e.walletId === w.id)
-                                .reduce((sum, e) => sum + (e.convertedAmountTrip || 0), 0)
-                        } : w);
+                                .reduce((sum, e) => sum + (e.convertedAmountTrip || 0), 0);
+                            
+                            // [FIX] Update wallet metadata (lastModified, fieldUpdates) to ensure sync propagates
+                            return {
+                                ...w,
+                                lots: updatedWallet.lots,
+                                spentAmount: nextSpentAmount,
+                                lastModified: curTime,
+                                fieldUpdates: stampFieldUpdates(w.fieldUpdates, { lots: updatedWallet.lots, spentAmount: nextSpentAmount }, curTime)
+                            };
+                        });
 
                         const targetW = finalWallets.find(w => w.id === walletId);
                         if (targetW) offlineSync.walletUpdate(walletId, targetW);

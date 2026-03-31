@@ -1,11 +1,13 @@
 import { Feather } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { TripPlan } from '@/src/types/models';
 import { useStore } from '@/src/store/useStore';
 import { GlassView } from './GlassView';
+import { AnimatedModal, StepTransition } from './AnimatedModal';
+import { PressableScale } from './PressableScale';
+import { RippleButton } from './RippleButton';
 
 interface TripShareModalProps {
     isVisible: boolean;
@@ -46,21 +48,7 @@ export const TripShareModal = ({ isVisible, trip, onClose }: TripShareModalProps
     };
 
     return (
-        <Modal
-            visible={isVisible}
-            transparent
-            animationType="fade"
-            onRequestClose={handleClose}
-        >
-            <TouchableOpacity
-                style={styles.container}
-                activeOpacity={1}
-                onPress={handleClose}
-            >
-                <BlurView intensity={40} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
-
-                <TouchableOpacity activeOpacity={1} style={styles.modalContent}>
+        <AnimatedModal visible={isVisible} onClose={handleClose}>
                     <GlassView
                         intensity={isDark ? 80 : 70}
                         borderRadius={32}
@@ -71,11 +59,11 @@ export const TripShareModal = ({ isVisible, trip, onClose }: TripShareModalProps
                                 <Text style={[styles.title, isDark && { color: '#F2F0E8' }]}>{trip.title}</Text>
                             </View>
 
+                            <StepTransition stepKey={confirming ? 'confirm' : 'main'} direction={confirming ? 'forward' : 'backward'}>
                             {!confirming ? (
-                                <TouchableOpacity
+                                <PressableScale
                                     style={[styles.optionButton, isDark ? styles.optionDark : styles.optionLight]}
                                     onPress={handleToggleComplete}
-                                    activeOpacity={0.8}
                                 >
                                     <View style={[styles.optionIcon, { backgroundColor: accentBg }]}>
                                         <Feather
@@ -93,7 +81,7 @@ export const TripShareModal = ({ isVisible, trip, onClose }: TripShareModalProps
                                         </Text>
                                     </View>
                                     <Feather name="chevron-right" size={20} color={isDark ? "rgba(158,178,148,0.4)" : "#CBD5E1"} />
-                                </TouchableOpacity>
+                                </PressableScale>
                             ) : (
                                 <View style={{ width: '100%', alignItems: 'center' }}>
                                     <Text style={[styles.confirmTitle, isDark && { color: '#F2F0E8' }]}>
@@ -109,20 +97,20 @@ export const TripShareModal = ({ isVisible, trip, onClose }: TripShareModalProps
                                         >
                                             <Text style={[styles.confirmBtnText, { color: isDark ? '#9EB294' : '#64748b' }]}>Cancel</Text>
                                         </TouchableOpacity>
-                                        <TouchableOpacity
+                                        <RippleButton
                                             style={[styles.confirmBtn, { backgroundColor: '#5D6D54' }]}
                                             onPress={handleConfirmComplete}
+                                            glowColor="rgba(93, 109, 84, 0.4)"
                                         >
                                             <Text style={[styles.confirmBtnText, { color: '#fff' }]}>Complete</Text>
-                                        </TouchableOpacity>
+                                        </RippleButton>
                                     </View>
                                 </View>
                             )}
+                            </StepTransition>
                         </View>
                     </GlassView>
-                </TouchableOpacity>
-            </TouchableOpacity>
-        </Modal>
+        </AnimatedModal>
     );
 };
 

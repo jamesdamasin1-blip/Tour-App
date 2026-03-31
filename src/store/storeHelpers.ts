@@ -1,6 +1,6 @@
-import { Expense, Wallet } from '../types/models';
+import { Expense, Wallet, Activity } from '../types/models';
 import {
-    syncTrip, syncTripUpdate, syncTripDelete,
+    syncTrip, syncTripUpdate, syncTripDelete, syncTripHide,
     syncActivity, syncActivityUpdate, syncActivityDelete,
     syncExpense, syncExpenseUpdate, syncExpenseDelete,
     syncExchangeEvent, syncWallet, syncWalletUpdate,
@@ -14,6 +14,7 @@ export const offlineSync = {
     trip: (data: any) => { try { syncTrip(data); } catch (e) { console.error('[Persist] trip:', e); } },
     tripUpdate: (id: string, data: any) => { try { syncTripUpdate(id, data); } catch (e) { console.error('[Persist] tripUpdate:', e); } },
     tripDelete: (id: string) => { try { syncTripDelete(id); } catch (e) { console.error('[Persist] tripDelete:', e); } },
+    tripHide: (id: string, data: any) => { try { syncTripHide(id, data); } catch (e) { console.error('[Persist] tripHide:', e); } },
     activity: (data: any) => { try { syncActivity(data); } catch (e) { console.error('[Persist] activity:', e); } },
     activityUpdate: (id: string, data: any) => { try { syncActivityUpdate(id, data); } catch (e) { console.error('[Persist] activityUpdate:', e); } },
     activityDelete: (id: string) => { try { syncActivityDelete(id); } catch (e) { console.error('[Persist] activityDelete:', e); } },
@@ -80,12 +81,19 @@ export const reverseFIFO = (wallet: Wallet, expense: Expense): Wallet['lots'] =>
     return restored;
 };
 
-/** Recompute spentAmount from the expense ledger — O(n+m) via pre-indexed map */
-export const recomputeWalletSpent = (wallets: Wallet[], expenses: Expense[]): Wallet[] => {
+/** Recompute spentAmount from the expense ledger and completed activities — O(n+m) via pre-indexed maps */
+export const recomputeWalletSpent = (
+    wallets: Wallet[], 
+    expenses: Expense[], 
+    activities: Activity[] = []
+): Wallet[] => {
     const spentByWallet = new Map<string, number>();
+    
+    // Sum valid expenses
     for (const e of expenses) {
         spentByWallet.set(e.walletId, (spentByWallet.get(e.walletId) || 0) + (e.convertedAmountTrip || 0));
     }
+
     return wallets.map(w => ({
         ...w,
         spentAmount: spentByWallet.get(w.id) || 0,

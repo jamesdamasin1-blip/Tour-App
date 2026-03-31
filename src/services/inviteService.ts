@@ -27,6 +27,10 @@ export const inviteService = {
         fromEmail: string | null;
         role?: 'editor' | 'viewer';
     }): Promise<TripInvite> {
+        if (params.toEmail.toLowerCase().trim() === params.fromEmail?.toLowerCase().trim()) {
+            throw new Error('You cannot invite yourself to your own trip');
+        }
+
         // Check for existing pending invite to same email for same trip
         const { data: existing } = await supabase
             .from('trip_invites')

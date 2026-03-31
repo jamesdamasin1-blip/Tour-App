@@ -1,11 +1,12 @@
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { GlassView } from '@/components/GlassView';
 import { useStore } from '@/src/store/useStore';
 import DateTimePicker from 'react-native-ui-datepicker';
 import dayjs from 'dayjs';
+import { AnimatedModal } from '@/components/AnimatedModal';
+import { PressableScale } from '@/components/PressableScale';
 
 interface DurationPickerModalProps {
     visible: boolean;
@@ -21,10 +22,8 @@ export const DurationPickerModal = ({ visible, onClose, startDate, endDate, onDa
     const isDark = theme === 'dark';
 
     return (
-        <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
+        <AnimatedModal visible={visible} onClose={onClose}>
             <View className="flex-1 justify-center items-center px-6">
-                <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
                 <GlassView
                     intensity={isDark ? 80 : 100}
                     borderRadius={32}
@@ -78,12 +77,12 @@ export const DurationPickerModal = ({ visible, onClose, startDate, endDate, onDa
                     />
                     
                     {!endDate && (
-                        <TouchableOpacity onPress={onClose} className="mt-6 py-4 bg-[#5D6D54] rounded-2xl items-center shadow-sm">
+                        <PressableScale onPress={onClose} className="mt-6 py-4 bg-[#5D6D54] rounded-2xl items-center shadow-sm">
                             <Text className="text-white font-bold uppercase tracking-wider">Confirm</Text>
-                        </TouchableOpacity>
+                        </PressableScale>
                     )}
                 </GlassView>
             </View>
-        </Modal>
+        </AnimatedModal>
     );
 };

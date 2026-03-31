@@ -263,13 +263,13 @@ export const ActivityListItem = React.memo(({
                             <View style={styles.cardPadding}>
                                 <View style={styles.header}>
                                     <View style={styles.headerLeft}>
-                                        <View style={[styles.iconBox, { backgroundColor: getCategoryTheme(activity.category).bg, opacity: isDark ? 0.9 : 1 }]}>
-                                            <Feather name={getCategoryTheme(activity.category).icon as any} size={22} color={getCategoryTheme(activity.category).color} />
+                                        <View style={[styles.iconBox, { backgroundColor: getCategoryTheme(activity.category ?? 'general').bg, opacity: isDark ? 0.9 : 1 }]}>
+                                            <Feather name={getCategoryTheme(activity.category ?? 'general').icon as any} size={22} color={getCategoryTheme(activity.category ?? 'general').color} />
                                         </View>
                                         <View style={{ flex: 1 }}>
                                             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                                 <Text style={[styles.title, isDark && { color: '#F2F0E8' }]} numberOfLines={1}>
-                                                    {activity.title.toUpperCase()}
+                                                    {(activity.title ?? '').toUpperCase()}
                                                 </Text>
                                             </View>
                                             <Text style={[styles.subtitle, isDark && { color: '#9EB294' }]}>

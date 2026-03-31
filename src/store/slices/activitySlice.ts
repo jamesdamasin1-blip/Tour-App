@@ -3,215 +3,273 @@ import { Activity, Expense, Wallet } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
 import { applyExpenseFIFO } from '../../finance/expense/expenseEngine';
 import { getDefaultLot } from '../../finance/wallet/walletEngine';
-import { offlineSync, reverseFIFO, recomputeWalletSpent, stampFieldUpdates } from '../storeHelpers';
+import { reverseFIFO, stampFieldUpdates } from '../storeHelpers';
 import type { AppState } from '../useStore';
 
 export interface ActivitySlice {
     activities: Activity[];
-    addActivity: (activity: Omit<Activity, 'id' | 'expenses' | 'lastModified'>) => void;
-    updateActivity: (id: string, activity: Partial<Omit<Activity, 'id' | 'expenses' | 'lastModified'>> & { expenses?: Expense[], recalculateExpenses?: boolean }) => void;
-    deleteActivity: (id: string) => void;
-    toggleActivityCompletion: (id: string) => void;
+    addActivity: (activity: Omit<Activity, 'id' | 'lastModified'> & { expenses?: Expense[] }) => Promise<void>;
+    updateActivity: (id: string, activity: Partial<Omit<Activity, 'id' | 'expenses' | 'lastModified'>> & { expenses?: Expense[], recalculateExpenses?: boolean }) => Promise<void>;
+    deleteActivity: (id: string) => Promise<void>;
+    toggleActivityCompletion: (id: string) => Promise<void>;
 }
 
-export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> = (set) => ({
+/**
+ * Convert a raw expense to have correct home/trip amounts using the wallet's locked rate.
+ * Skips conversion when pre-computed amounts are already present and recalculation is not forced.
+ */
+const withConvertedAmounts = (exp: any, trip: any, recalculate: boolean): any => {
+    if (exp.convertedAmountHome && exp.convertedAmountTrip && !recalculate) return { ...exp };
+    const expWallet = trip?.wallets?.find((w: any) => w.id === exp.walletId);
+    const defaultLot = expWallet ? getDefaultLot(expWallet) : undefined;
+    const lockedRate = defaultLot?.lockedRate ?? expWallet?.baselineExchangeRate ?? 1;
+    const currency = exp.currency || expWallet?.currency || trip?.tripCurrency || trip?.homeCurrency || 'PHP';
+    return {
+        ...exp,
+        convertedAmountHome: Math.round(exp.amount * lockedRate * 100) / 100,
+        convertedAmountTrip: exp.amount,
+        currency,
+    };
+};
+
+export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> = (set, get) => ({
     activities: [],
 
-    addActivity: (activityData) =>
-        set((state) => {
-            const newActivity = {
-                ...activityData,
-                id: generateId(),
-                expenses: [],
-                lastModified: Date.now(),
-                version: 1,
-                deletedAt: null,
-                fieldUpdates: stampFieldUpdates({}, activityData),
-            };
-
-            offlineSync.activity(newActivity);
-
+    addActivity: async (activityData) => {
+        const state = get();
+        const trip = state.trips.find(t => t.id === activityData.tripId);
+        const inputExpenses = activityData.expenses || [];
+        const activityId = generateId();
+        const finalExpenses: Expense[] = inputExpenses.map((exp: any) => {
+            const normalized = withConvertedAmounts(exp, trip, false);
             return {
-                activities: [...state.activities, newActivity],
-                trips: state.trips.map(t => t.id === activityData.tripId ? { ...t, lastModified: newActivity.lastModified } : t)
+                ...normalized,
+                tripId: activityData.tripId,
+                walletId: normalized.walletId || activityData.walletId,
+                activityId,
+                name: normalized.name || activityData.title,
             };
-        }),
+        });
+        const newActivity = {
+            ...activityData,
+            id: activityId,
+            expenses: finalExpenses,
+            lastModified: Date.now(),
+            version: 1,
+            deletedAt: null,
+            fieldUpdates: stampFieldUpdates({}, activityData),
+        };
+        console.log(`[STORE] Adding activity ${newActivity.id} to trip ${newActivity.tripId} directly to DB`);
+        
+        const { mapActivityToDb } = await import('../../mappers/activity.mapper');
+        // @ts-ignore
+        const dbActivity = mapActivityToDb(newActivity);
+        
+        // 1. Direct DB Write
+        const { supabase } = await import('../../utils/supabase');
+        const { error } = await supabase.from('activities').insert(dbActivity);
+        
+        if (error) {
+            console.error('[Activity] Add failed:', error);
+            return;
+        }
 
-    updateActivity: (id, activityData) =>
-        set((state) => {
-            const activity = state.activities.find(a => a.id === id);
-            if (!activity) return state;
-
-            const lastModified = Date.now();
-            const trip = state.trips.find(t => t.id === activity.tripId);
-
-            let finalExpenses = activity.expenses;
-            if (activityData.expenses) {
-                finalExpenses = activityData.expenses.map((exp: any) => {
-                    if (exp.convertedAmountHome && exp.convertedAmountTrip && !activityData.recalculateExpenses) {
-                        return { ...exp };
-                    }
-
-                    const expWallet = trip?.wallets?.find(w => w.id === exp.walletId);
-                    const defaultLot = expWallet ? getDefaultLot(expWallet as any) : undefined;
-                    const lockedRate: number = defaultLot?.lockedRate ?? (expWallet as any)?.baselineExchangeRate ?? 1;
-
-                    const expenseCurrency = exp.currency || expWallet?.currency || trip?.tripCurrency || trip?.homeCurrency || 'PHP';
-                    const convertedAmountTrip = exp.amount;
-                    const convertedAmountHome = Math.round(convertedAmountTrip * lockedRate * 100) / 100;
-
-                    return {
-                        ...exp,
-                        convertedAmountHome,
-                        convertedAmountTrip,
-                        currency: expenseCurrency
-                    };
-                });
+        if (finalExpenses.length > 0) {
+            const { mapExpenseToDb } = await import('../../mappers/expense.mapper');
+            // @ts-ignore
+            const dbExpenses = finalExpenses.map((e: any) => ({ ...mapExpenseToDb(e), updated_at: newActivity.lastModified }));
+            const { error: expErr } = await supabase.from('expenses').upsert(dbExpenses);
+            if (expErr) {
+                console.error('[Activity] Add expenses failed:', expErr);
+                return;
             }
+        }
 
-            const updated = {
-                ...activity,
-                ...activityData,
-                expenses: finalExpenses,
-                lastModified,
-                fieldUpdates: stampFieldUpdates(activity.fieldUpdates, activityData, lastModified, ['expenses', 'recalculateExpenses']),
-            };
+        // 2. Hard Refetch
+        const { refetchTripActivities } = await import('../../sync/syncEngine');
+        await refetchTripActivities(activityData.tripId);
+    },
 
-            offlineSync.activityUpdate(id, updated);
-            if (activityData.expenses) {
-                // Soft-delete OLD expenses from DB so they don't accumulate on other devices after sync.
-                // Without this, old rows persist in Supabase and pull-sync returns both old + new,
-                // causing cost to show as sum of all versions (e.g. 17k + 15k = 32k).
-                const oldExpenseIds = new Set(finalExpenses.map((e: any) => e.id));
-                activity.expenses
-                    .filter(e => !oldExpenseIds.has(e.id))
-                    .forEach(e => offlineSync.expenseDelete(e.id));
+    updateActivity: async (id, activityData) => {
+        const state = get();
+        const activity = state.activities.find(a => a.id === id);
+        if (!activity) return;
 
-                finalExpenses.forEach((e: any) => offlineSync.expense(e));
+        // Guard: Prevent actual cost edits when completed
+        if (activity.isCompleted && activityData.expenses) {
+            console.warn('[Activity] Cannot edit cost of a completed activity.');
+            return;
+        }
+
+        const trip = state.trips.find(t => t.id === activity.tripId);
+        
+        const finalExpenses: Expense[] = activityData.expenses
+            ? activityData.expenses.map((exp: any) =>
+                withConvertedAmounts(exp, trip, !!activityData.recalculateExpenses)
+              )
+            : activity.expenses;
+
+        const { mapActivityToDb } = await import('../../mappers/activity.mapper');
+        const lastModified = Date.now();
+        const fieldUpdates = stampFieldUpdates(activity.fieldUpdates, activityData, lastModified, ['expenses', 'recalculateExpenses']);
+        
+        // @ts-ignore
+        const dbActivity = mapActivityToDb({ ...activity, ...activityData, lastModified, fieldUpdates });
+        
+        // 1. Direct DB Read/Write
+        const { supabase } = await import('../../utils/supabase');
+        const { error: actErr } = await supabase.from('activities').update(dbActivity).eq('id', id);
+        
+        if (actErr) {
+            console.error('[Activity] Update failed:', actErr);
+            return;
+        }
+
+        // 2. Direct DB mutations for expenses (actual cost representation)
+        if (activityData.expenses) {
+            const { mapExpenseToDb } = await import('../../mappers/expense.mapper');
+            const newIds = new Set(finalExpenses.map((e: any) => e.id));
+            
+            // Soft delete removed
+            const removedIds = activity.expenses.filter(e => !newIds.has(e.id)).map(e => e.id);
+            if (removedIds.length > 0) {
+                await supabase.from('expenses').update({ deleted_at: new Date().toISOString() }).in('id', removedIds);
             }
+            
+            // Upsert remaining/new
+            if (finalExpenses.length > 0) {
+                // @ts-ignore
+                const dbExpenses = finalExpenses.map((e: any) => ({ ...mapExpenseToDb(e), updated_at: lastModified }));
+                await supabase.from('expenses').upsert(dbExpenses);
+            }
+        }
 
-            const updatedExpenses = activityData.expenses
-                ? [
-                    ...state.expenses.filter(e => e.activityId !== id),
-                    ...finalExpenses
-                  ]
-                : state.expenses;
+        // 3. Hard Refetch
+        const { refetchTripActivities } = await import('../../sync/syncEngine');
+        await refetchTripActivities(activity.tripId);
+    },
 
-            // Compute updated wallets with FIFO before the return so we can also sync them.
-            const updatedTrips = state.trips.map(t => {
-                if (t.id !== activity.tripId) return t;
-                if (!activityData.expenses) return { ...t, lastModified };
+    deleteActivity: async (id) => {
+        const activity = get().activities.find(a => a.id === id);
+        if (!activity) return;
 
-                let wallets = t.wallets.map((w): Wallet => {
-                    const oldExpenses = state.expenses.filter(
-                        e => e.activityId === id && e.walletId === w.id
-                    );
-                    let lots = w.lots || [];
-                    for (const exp of oldExpenses) {
-                        lots = reverseFIFO({ ...w, lots } as Wallet, exp);
+        const { supabase } = await import('../../utils/supabase');
+        // Direct DB Soft Delete
+        const { error } = await supabase.from('activities').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+        
+        if (error) {
+            console.error('[Activity] Delete failed:', error);
+            return;
+        }
+
+        const { refetchTripActivities } = await import('../../sync/syncEngine');
+        await refetchTripActivities(activity.tripId);
+    },
+
+    toggleActivityCompletion: async (id: string) => {
+        const state = get();
+        const activity = state.activities.find(a => a.id === id);
+        if (!activity) return;
+
+        const { supabase } = await import('../../utils/supabase');
+
+        // Always fetch current DB status before toggling
+        const { data: dbRow, error: fetchErr } = await supabase
+            .from('activities')
+            .select('is_completed')
+            .eq('id', id)
+            .single();
+
+        if (fetchErr || !dbRow) {
+            console.error('[Activity] Toggle completion: failed to fetch current DB status:', fetchErr);
+            return;
+        }
+
+        const isCompleted = !dbRow.is_completed;
+        const lastModified = Date.now();
+
+        // Start Deferred FIFO Logic
+        const trip = state.trips.find(t => t.id === activity.tripId);
+        if (!trip) return;
+
+        // Clone wallets for modification
+        let updatedWallets = [...trip.wallets];
+        const activityExpenses = state.expenses.filter(e => e.activityId === id);
+        const expensesToUpdate: Expense[] = [];
+
+        for (const exp of activityExpenses) {
+            const walletIndex = updatedWallets.findIndex(w => w.id === exp.walletId);
+            if (walletIndex === -1) continue;
+
+            const wallet = updatedWallets[walletIndex];
+
+            if (isCompleted && !exp.lotBreakdown) {
+                // Apply FIFO
+                try {
+                    const amount = typeof exp.convertedAmountTrip === 'number' && exp.convertedAmountTrip > 0 
+                        ? exp.convertedAmountTrip 
+                        : typeof exp.amount === 'number' ? exp.amount : 0;
+                    
+                    if (amount > 0) {
+                        const { updatedWallet, breakdown } = applyExpenseFIFO(wallet as any, amount);
+                        updatedWallets[walletIndex] = updatedWallet as Wallet;
+                        expensesToUpdate.push({ ...exp, lotBreakdown: breakdown, lastModified });
                     }
-
-                    const newExpenses = finalExpenses.filter(
-                        (e: any) => e.walletId === w.id
-                    );
-                    for (const exp of newExpenses) {
-                        const amount = exp.convertedAmountTrip || 0;
-                        if (amount > 0) {
-                            try {
-                                const fifoResult = applyExpenseFIFO(
-                                    { ...w, lots } as any, amount
-                                );
-                                lots = fifoResult.updatedWallet.lots;
-                                exp.lotBreakdown = fifoResult.breakdown;
-                            } catch (e) {
-                                console.error('[updateActivity] FIFO re-apply failed:', e);
-                            }
-                        }
-                    }
-
-                    return { ...w, lots };
-                });
-
-                wallets = recomputeWalletSpent(wallets, updatedExpenses);
-
-                // Sync updated wallet state so collaborators receive FIFO-updated lots via realtime.
-                // Also bump the trip row so pull-based sync picks up the updated wallet state.
-                if (activityData.expenses) {
-                    wallets.forEach(w => offlineSync.walletUpdate(w.id, w));
-                    const tripForSync = { ...t, lastModified, wallets };
-                    offlineSync.tripUpdate(t.id, tripForSync);
+                } catch (e) {
+                    console.error('[FIFO] Failed to apply FIFO during activity completion:', e);
                 }
-
-                return { ...t, lastModified, wallets };
-            });
-
-            return {
-                activities: state.activities.map(a => a.id === id ? updated : a),
-                expenses: updatedExpenses,
-                trips: updatedTrips,
-            };
-        }),
-
-    deleteActivity: (id) =>
-        set((state) => {
-            const activity = state.activities.find(a => a.id === id);
-            if (!activity) return state;
-
-            const lastModified = Date.now();
-
-            offlineSync.activityDelete(id);
-
-            // Completed activities: money is already permanently spent.
-            // Remove the activity record but keep expenses in state so
-            // wallet spentAmount and lot balances stay unchanged.
-            if (activity.isCompleted) {
-                return {
-                    activities: state.activities.filter(a => a.id !== id),
-                    trips: state.trips.map(t =>
-                        t.id === activity.tripId ? { ...t, lastModified } : t
-                    ),
-                };
+            } else if (!isCompleted && exp.lotBreakdown) {
+                // Reverse FIFO
+                try {
+                    const restoredLots = reverseFIFO(wallet as any, exp as any);
+                    updatedWallets[walletIndex] = { ...wallet, lots: restoredLots };
+                    // Reset lotBreakdown
+                    const { lotBreakdown, ...clearedExp } = exp;
+                    expensesToUpdate.push({ ...clearedExp, lastModified } as Expense);
+                } catch (e) {
+                    console.error('[FIFO] Failed to reverse FIFO during activity un-completion:', e);
+                }
             }
+        }
 
-            // Incomplete activities: restore wallet balance by reversing FIFO.
-            const activityExpenses = state.expenses.filter(e => e.activityId === id);
-            activityExpenses.forEach(e => offlineSync.expenseDelete(e.id));
+        // Send updates to Database
+        
+        // 1. Update expenses with lotBreakdowns
+        if (expensesToUpdate.length > 0) {
+            const { mapExpenseToDb } = await import('../../mappers/expense.mapper');
+            // @ts-ignore
+            const dbExpenses = expensesToUpdate.map(e => ({ ...mapExpenseToDb(e), updated_at: lastModified }));
+            await supabase.from('expenses').upsert(dbExpenses);
+        }
 
-            const updatedTrips = state.trips.map(t => {
-                if (t.id !== activity.tripId) return t;
-                const wallets = t.wallets.map((w): Wallet => {
-                    const walletExpenses = activityExpenses.filter(e => e.walletId === w.id);
-                    if (!walletExpenses.length) return w;
-                    let lots = w.lots || [];
-                    for (const exp of walletExpenses) {
-                        lots = reverseFIFO({ ...w, lots } as Wallet, exp);
-                    }
-                    return { ...w, lots };
-                });
-                return { ...t, lastModified, wallets };
-            });
+        // 2. Update the authoritative wallets table with new lot arrays
+        if (expensesToUpdate.length > 0) {
+            const { mapWalletToDb } = await import('../../mappers/wallet.mapper');
+            for (const wallet of updatedWallets) {
+                const originalWallet = trip.wallets.find(w => w.id === wallet.id);
+                // Only send UPSERT if the lot breakdown actually changed for this wallet
+                if (originalWallet && JSON.stringify(originalWallet.lots) !== JSON.stringify(wallet.lots)) {
+                    // @ts-ignore
+                    const dbWallet = mapWalletToDb({ ...wallet, lastModified });
+                    await supabase.from('wallets').upsert(dbWallet);
+                }
+            }
+        }
 
-            return {
-                activities: state.activities.filter(a => a.id !== id),
-                expenses: state.expenses.filter(e => e.activityId !== id),
-                trips: updatedTrips,
-            };
-        }),
+        // 3. Update the activity itself
+        const { error } = await supabase.from('activities').update({
+            is_completed: isCompleted,
+            last_modified: lastModified,
+            updated_at: lastModified,
+        }).eq('id', id);
 
-    toggleActivityCompletion: (id: string) =>
-        set((state) => {
-            const activity = state.activities.find(a => a.id === id);
-            if (!activity) return state;
+        if (error) {
+            console.error('[Activity] Toggle completion failed:', error);
+            return;
+        }
 
-            const lastModified = Date.now();
-            const isCompleted = !activity.isCompleted;
-            const fieldUpdates = stampFieldUpdates(activity.fieldUpdates, { isCompleted }, lastModified);
-
-            offlineSync.activityUpdate(id, { ...activity, isCompleted, lastModified, fieldUpdates });
-
-            return {
-                activities: state.activities.map(a => a.id === id ? { ...a, isCompleted, lastModified, fieldUpdates } : a),
-                trips: state.trips.map(t => t.id === activity.tripId ? { ...t, lastModified } : t)
-            };
-        }),
+        // Hard Refetch — updates this device immediately.
+        const { refetchTripActivities } = await import('../../sync/syncEngine');
+        await refetchTripActivities(activity.tripId);
+    },
 });

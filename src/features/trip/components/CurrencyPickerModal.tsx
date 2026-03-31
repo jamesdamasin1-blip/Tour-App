@@ -1,9 +1,9 @@
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { GlassView } from '@/components/GlassView';
 import { useStore } from '@/src/store/useStore';
+import { AnimatedModal } from '@/components/AnimatedModal';
 
 interface CurrencyPickerModalProps {
     visible: boolean;
@@ -18,10 +18,8 @@ export const CurrencyPickerModal = ({ visible, onClose, onSelect, selectedCurren
     const isDark = theme === 'dark';
 
     return (
-        <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-            <TouchableOpacity activeOpacity={1} onPress={onClose} className="flex-1 justify-end">
-                <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
+        <AnimatedModal visible={visible} onClose={onClose} origin="bottom">
+            <View className="flex-1 justify-end">
                 <GlassView
                     intensity={isDark ? 80 : 95}
                     borderRadius={32}
@@ -61,7 +59,7 @@ export const CurrencyPickerModal = ({ visible, onClose, onSelect, selectedCurren
                         </View>
                     </ScrollView>
                 </GlassView>
-            </TouchableOpacity>
-        </Modal>
+            </View>
+        </AnimatedModal>
     );
 };

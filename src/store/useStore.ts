@@ -7,7 +7,6 @@ import { ActivitySlice, createActivitySlice } from './slices/activitySlice';
 import { ExpenseSlice, createExpenseSlice } from './slices/expenseSlice';
 import { ExchangeEventSlice, createExchangeEventSlice } from './slices/exchangeEventSlice';
 import { SettingsSlice, createSettingsSlice } from './slices/settingsSlice';
-import { CloudSlice, createCloudSlice } from './slices/cloudSlice';
 import { InviteSlice, createInviteSlice } from './slices/inviteSlice';
 
 // ─── Composed State ──────────────────────────────────────────────
@@ -18,7 +17,6 @@ export type AppState =
     ExpenseSlice &
     ExchangeEventSlice &
     SettingsSlice &
-    CloudSlice &
     InviteSlice;
 
 export const useStore = create<AppState>()(
@@ -29,7 +27,6 @@ export const useStore = create<AppState>()(
             ...createExpenseSlice(...a),
             ...createExchangeEventSlice(...a),
             ...createSettingsSlice(...a),
-            ...createCloudSlice(...a),
             ...createInviteSlice(...a),
         }),
         {

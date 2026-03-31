@@ -1,11 +1,11 @@
 import { GlassView } from '@/components/GlassView';
-import { BlurView } from 'expo-blur';
 import { Activity } from '@/src/types/models';
 import { useStore } from '../src/store/useStore';
 import { Calculations } from '@/src/utils/mathUtils';
 import { Feather } from '@expo/vector-icons';
 import React from 'react';
-import { Animated, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AnimatedModal } from './AnimatedModal';
 
 interface ActivitySummaryModalProps {
     isVisible: boolean;
@@ -61,22 +61,11 @@ export function ActivitySummaryModal({
     const hasExpenses = activity.expenses && activity.expenses.length > 0;
 
     return (
-        <Modal transparent visible={isVisible} animationType="fade" onRequestClose={onClose}>
-            <TouchableOpacity 
-                style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
-                activeOpacity={1} 
-                onPress={onClose}
-            >
-                <BlurView intensity={40} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
-                
-                <View style={{ width: '100%', maxWidth: 440, paddingHorizontal: 16 }}>
-                    <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+        <AnimatedModal visible={isVisible} onClose={onClose}>
                     <GlassView
                         intensity={isDark ? 80 : 100}
                         borderRadius={40}
                         backgroundColor={isDark ? 'rgba(30, 34, 28, 0.97)' : 'rgba(255, 255, 255, 0.98)'}
-                        borderColor={isDark ? 'rgba(158,178,148,0.2)' : 'rgba(93,109,84,0.15)'}
                         style={{ width: '100%', overflow: 'hidden' }}
                     >
                         <Animated.View style={{ width: pageWidth * 2, flexDirection: 'row', transform: [{ translateX: slideAnim }] }}>
@@ -191,10 +180,7 @@ export function ActivitySummaryModal({
                             </TouchableOpacity>
                         )}
                     </GlassView>
-                    </TouchableOpacity>
-                </View>
-            </TouchableOpacity>
-        </Modal>
+        </AnimatedModal>
     );
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "aliqual",
   "main": "expo-router/entry",
-  "version": "1.3.40",
+  "version": "1.3.52",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",

@@ -52,6 +52,8 @@ export default function TripDetailScreen() {
     const [isAddExchangeVisible, setIsAddExchangeVisible] = useState(false);
     const [isExchangeHistoryVisible, setIsExchangeHistoryVisible] = useState(false);
     const [isBuddiesVisible, setIsBuddiesVisible] = useState(false);
+    const [isScannerVisible, setIsScannerVisible] = useState(false);
+    const [isFullSummaryOpen, setIsFullSummaryOpen] = useState(false);
     const [selectedDateIndex, setSelectedDateIndex] = useState(0);
     const [showDeletePanel, setShowDeletePanel] = useState(false);
     const lastPressTime = useRef<number | null>(null);
@@ -308,35 +310,37 @@ export default function TripDetailScreen() {
                 onBack={() => router.replace('/')}
                 showThemeToggle={false}
                 rightElement={
-                    isCreator && tripDeletionRequests.length > 0 ? (
-                        <TouchableOpacity
-                            onPress={() => setShowDeletePanel(prev => !prev)}
-                            activeOpacity={0.75}
-                            style={{ position: 'relative' }}
-                        >
-                            <View style={{
-                                width: 40, height: 40, borderRadius: 12,
-                                backgroundColor: showDeletePanel
-                                    ? (isDark ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.25)')
-                                    : (isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.12)'),
-                                borderWidth: 1, borderColor: isDark ? 'rgba(245,158,11,0.35)' : 'rgba(245,158,11,0.4)',
-                                alignItems: 'center', justifyContent: 'center',
-                            }}>
-                                <Feather name="alert-triangle" size={18} color="#F5A623" />
-                            </View>
-                            <View style={{
-                                position: 'absolute', top: -4, right: -4,
-                                minWidth: 16, height: 16, borderRadius: 8,
-                                backgroundColor: '#ef4444',
-                                alignItems: 'center', justifyContent: 'center',
-                                paddingHorizontal: 3,
-                            }}>
-                                <Text style={{ fontSize: 9, fontWeight: '900', color: '#fff' }}>
-                                    {tripDeletionRequests.length}
-                                </Text>
-                            </View>
-                        </TouchableOpacity>
-                    ) : undefined
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                        {isCreator && tripDeletionRequests.length > 0 && (
+                            <TouchableOpacity
+                                onPress={() => setShowDeletePanel(prev => !prev)}
+                                activeOpacity={0.75}
+                                style={{ position: 'relative' }}
+                            >
+                                <View style={{
+                                    width: 40, height: 40, borderRadius: 12,
+                                    backgroundColor: showDeletePanel
+                                        ? (isDark ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.25)')
+                                        : (isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.12)'),
+                                    borderWidth: 1, borderColor: isDark ? 'rgba(245,158,11,0.35)' : 'rgba(245,158,11,0.4)',
+                                    alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                    <Feather name="alert-triangle" size={18} color="#F5A623" />
+                                </View>
+                                <View style={{
+                                    position: 'absolute', top: -4, right: -4,
+                                    minWidth: 16, height: 16, borderRadius: 8,
+                                    backgroundColor: '#ef4444',
+                                    alignItems: 'center', justifyContent: 'center',
+                                    paddingHorizontal: 3,
+                                }}>
+                                    <Text style={{ fontSize: 9, fontWeight: '900', color: '#fff' }}>
+                                        {tripDeletionRequests.length}
+                                    </Text>
+                                </View>
+                            </TouchableOpacity>
+                        )}
+                    </View>
                 }
             />
         ), [trip, router, isCreator, tripDeletionRequests, isDark, showDeletePanel]);
@@ -586,7 +590,7 @@ export default function TripDetailScreen() {
 
                 {/* Date navigator */}
                 {activitiesByDate.length > 1 && (
-                    <View className="mt-6 mb-2">
+                    <View className="mt-6 mb-0">
                         <View className="flex-row items-center justify-between mb-4 px-4">
                             <TouchableOpacity
                                 onPress={() => setSelectedDateIndex(prev => Math.max(0, prev - 1))}
@@ -788,6 +792,7 @@ export default function TripDetailScreen() {
                 visible={isBuddiesVisible}
                 onClose={() => setIsBuddiesVisible(false)}
             />
+
         </MeshBackground>
     );
 }

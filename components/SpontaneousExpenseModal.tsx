@@ -1,12 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { 
-    Modal, 
-    View, 
-    Text, 
-    TouchableOpacity, 
-    StyleSheet, 
-    TextInput, 
-    ScrollView, 
+import {
+    View,
+    Text,
+    TouchableOpacity,
+    StyleSheet,
+    TextInput,
+    ScrollView,
     Dimensions,
     KeyboardAvoidingView,
     Platform
@@ -14,6 +13,9 @@ import {
 import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
 import { GlassView } from './GlassView';
+import { AnimatedModal } from './AnimatedModal';
+import { PressableScale } from './PressableScale';
+import { RippleButton } from './RippleButton';
 import { CurrencyInput } from './CurrencyInput';
 import { useStore } from '@/src/store/useStore';
 import { CATEGORY_THEME } from '@/src/constants/categories';
@@ -127,27 +129,7 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
     };
 
     return (
-        <Modal
-            visible={visible}
-            transparent
-            animationType="fade"
-            onRequestClose={onClose}
-        >
-            <View style={styles.centeredView}>
-                <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
-                <TouchableOpacity
-                    style={StyleSheet.absoluteFill}
-                    activeOpacity={1}
-                    onPress={onClose}
-                />
-
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={styles.container}
-                    pointerEvents="box-none"
-                >
-                    <TouchableOpacity activeOpacity={1} style={styles.cardWrapper}>
+        <AnimatedModal visible={visible} onClose={onClose}>
                     <GlassView
                         intensity={isDark ? 50 : 95}
                         borderRadius={32}
@@ -241,32 +223,19 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
                             </View>
                         </ScrollView>
 
-                        <TouchableOpacity
+                        <RippleButton
                             style={[styles.logButton, { backgroundColor: isDark ? '#B2C4AA' : '#5D6D54' }, (!title || !amount) && styles.logButtonDisabled]}
                             onPress={handleLog}
                             disabled={!title || !amount}
+                            glowColor={isDark ? 'rgba(178, 196, 170, 0.5)' : 'rgba(93, 109, 84, 0.4)'}
                         >
                             <Text style={[styles.logButtonText, { color: isDark ? '#1a1a1a' : '#fff' }]}>LOG EXPENSE</Text>
                             <Feather name="check-circle" size={20} color={isDark ? "#1a1a1a" : "#fff"} style={{ marginLeft: 8 }} />
-                        </TouchableOpacity>
+                        </RippleButton>
                     </GlassView>
-                    </TouchableOpacity>
-                </KeyboardAvoidingView>
-            </View>
 
             {/* Wallet Selection Modal */}
-            <Modal
-                transparent
-                visible={isWalletModalVisible}
-                animationType="fade"
-            >
-                <View style={{ flex: 1 }}>
-                    <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-                    <TouchableOpacity 
-                        style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.45)', justifyContent: 'center', alignItems: 'center' }}
-                        activeOpacity={1}
-                        onPress={() => setIsWalletModalVisible(false)}
-                    >
+            <AnimatedModal visible={isWalletModalVisible} onClose={() => setIsWalletModalVisible(false)}>
                         <GlassView
                             style={{ borderRadius: 32, padding: 32, width: SCREEN_WIDTH - 64 }}
                             intensity={isDark ? 80 : 95}
@@ -274,7 +243,7 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
                         >
                             <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#F2F0E8' : '#1a1a1a', textTransform: 'uppercase', marginBottom: 24, textAlign: 'center' }}>Select Wallet</Text>
                             {walletsStats.map((wallet) => (
-                                <TouchableOpacity
+                                <PressableScale
                                     key={wallet.walletId}
                                     style={[styles.currencyItem, wallet.walletId === selectedWalletId && { backgroundColor: isDark ? 'rgba(158,178,148,0.1)' : 'rgba(93,109,84,0.05)', borderColor: isDark ? '#B2C4AA' : '#5D6D54' }]}
                                     onPress={() => {
@@ -288,13 +257,11 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
                                         <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#9EB294' : '#64748b' }}>{wallet.currency}</Text>
                                     </View>
                                     {wallet.walletId === selectedWalletId && <Feather name="check-circle" size={20} color={isDark ? "#B2C4AA" : "#5D6D54"} />}
-                                </TouchableOpacity>
+                                </PressableScale>
                             ))}
                         </GlassView>
-                    </TouchableOpacity>
-                </View>
-            </Modal>
-        </Modal>
+            </AnimatedModal>
+        </AnimatedModal>
     );
 };
 

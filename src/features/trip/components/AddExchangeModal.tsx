@@ -1,13 +1,12 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { 
-    Modal, 
-    View, 
-    Text, 
-    TouchableOpacity, 
-    TextInput, 
-    StyleSheet, 
-    KeyboardAvoidingView, 
-    Platform, 
+import {
+    View,
+    Text,
+    TouchableOpacity,
+    TextInput,
+    StyleSheet,
+    KeyboardAvoidingView,
+    Platform,
     ScrollView,
     Dimensions
 } from 'react-native';
@@ -17,7 +16,9 @@ import { useExchangeEvents } from '../hooks/useExchangeEvents';
 import { useTripWallet } from '../hooks/useTripWallet';
 import { Calculations as MathUtils } from '@/src/utils/mathUtils';
 import { useStore } from '@/src/store/useStore';
-import { BlurView } from 'expo-blur';
+import { AnimatedModal } from '@/components/AnimatedModal';
+import { PressableScale } from '@/components/PressableScale';
+import { RippleButton } from '@/components/RippleButton';
 import { CurrencyConversionService } from '@/src/services/currencyConversion';
 import { ExchangeEvent } from '@/src/types/models';
 
@@ -129,19 +130,8 @@ export const AddExchangeModal = ({ tripId, visible, onClose, editingEvent }: Add
     };
 
     return (
-        <Modal 
-            visible={visible} 
-            transparent 
-            animationType="fade"
-            onRequestClose={handleClose}
-        >
+        <AnimatedModal visible={visible} onClose={handleClose}>
             <View style={styles.overlay}>
-                <BlurView 
-                    intensity={isDark ? 30 : 20} 
-                    style={StyleSheet.absoluteFill} 
-                    tint={isDark ? "dark" : "light"} 
-                />
-                <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
                 
                 <KeyboardAvoidingView 
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -262,20 +252,27 @@ export const AddExchangeModal = ({ tripId, visible, onClose, editingEvent }: Add
                                 />
                             </View>
 
-                            <TouchableOpacity 
+                            <RippleButton
                                 onPress={handleSave}
-                                className="bg-[#5D6D54] py-4 rounded-2xl items-center justify-center shadow-xl mb-4"
-                                activeOpacity={0.8}
+                                glowColor="rgba(93, 109, 84, 0.4)"
+                                style={{
+                                    backgroundColor: '#5D6D54',
+                                    paddingVertical: 16,
+                                    borderRadius: 16,
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    marginBottom: 16,
+                                }}
                             >
                                 <Text className="text-white font-black uppercase tracking-[3px] text-xs">
                                     {isEditing ? 'SAVE CHANGES' : 'ADD BUDGET'}
                                 </Text>
-                            </TouchableOpacity>
+                            </RippleButton>
                         </ScrollView>
                     </GlassView>
                 </KeyboardAvoidingView>
             </View>
-        </Modal>
+        </AnimatedModal>
     );
 };
 

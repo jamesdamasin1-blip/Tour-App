@@ -40,17 +40,17 @@ export const MeshBackground: React.FC<{ children?: React.ReactNode; style?: any 
 
                 {/* Bottom-right blob: deeper sage warmth */}
                 <LinearGradient
-                    colors={['transparent', isDark ? 'rgba(57, 66, 51, 0.45)' : 'rgba(158, 178, 148, 0.40)']}
+                    colors={['transparent', isDark ? 'rgba(57, 66, 51, 0.45)' : 'rgba(158, 178, 148, 0.40)', 'transparent']}
                     start={{ x: 0.3, y: 0.5 }}
-                    end={{ x: 1, y: 1 }}
+                    end={{ x: 1, y: 0.9 }}
                     style={StyleSheet.absoluteFill}
                 />
 
                 {/* Bottom-left accent: soft olive mist */}
                 <LinearGradient
-                    colors={['transparent', isDark ? 'rgba(75, 85, 69, 0.30)' : 'rgba(196, 208, 182, 0.35)']}
+                    colors={['transparent', isDark ? 'rgba(75, 85, 69, 0.30)' : 'rgba(196, 208, 182, 0.35)', 'transparent']}
                     start={{ x: 0.6, y: 0.6 }}
-                    end={{ x: 0, y: 1 }}
+                    end={{ x: 0, y: 0.85 }}
                     style={StyleSheet.absoluteFill}
                 />
 

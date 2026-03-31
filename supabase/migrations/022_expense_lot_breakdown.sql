@@ -1,0 +1,2 @@
+ALTER TABLE expenses
+ADD COLUMN IF NOT EXISTS lot_breakdown JSONB;

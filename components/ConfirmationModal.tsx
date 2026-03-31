@@ -1,9 +1,11 @@
 import { Feather } from '@expo/vector-icons';
 import React from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useStore } from '../src/store/useStore';
 import { GlassView } from './GlassView';
+import { AnimatedModal } from './AnimatedModal';
+import { PressableScale } from './PressableScale';
+import { RippleButton } from './RippleButton';
 
 
 interface ConfirmationModalProps {
@@ -39,20 +41,11 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     const confirmBgColor = isDelete ? '#ef4444' : isEdit ? '#3b82f6' : '#5D6D54';
 
     return (
-        <Modal
-            transparent
-            visible={visible}
-            animationType="fade"
-            onRequestClose={onClose}
-        >
-            <View style={styles.overlay}>
-                <BlurView intensity={30} style={StyleSheet.absoluteFill} tint={isDark ? "dark" : "light"} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
+        <AnimatedModal visible={visible} onClose={onClose}>
                 <GlassView
                     intensity={isDark ? 80 : 100}
                     borderRadius={32}
                     backgroundColor={isDark ? 'rgba(30, 34, 28, 0.97)' : 'rgba(255, 255, 255, 0.98)'}
-                    borderColor={isDark ? 'rgba(158,178,148,0.2)' : 'rgba(93,109,84,0.15)'}
                     style={styles.modalContainer}
                 >
                     <View style={styles.content}>
@@ -60,25 +53,23 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                         <Text style={[styles.description, isDark && { color: '#9EB294' }]}>{description}</Text>
 
                         <View style={styles.buttonContainer}>
-                            <TouchableOpacity
+                            <PressableScale
                                 onPress={onClose}
                                 style={[styles.cancelButton, isDark && { backgroundColor: '#3A3F37' }]}
-                                activeOpacity={0.7}
                             >
                                 <Text style={[styles.cancelButtonText, isDark && { color: '#9EB294' }]}>{cancelLabel}</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
+                            </PressableScale>
+                            <RippleButton
                                 onPress={onConfirm}
+                                glowColor={confirmBgColor}
                                 style={[styles.confirmButton, { backgroundColor: confirmBgColor }]}
-                                activeOpacity={0.7}
                             >
                                 <Text style={styles.confirmButtonText}>{confirmLabel}</Text>
-                            </TouchableOpacity>
+                            </RippleButton>
                         </View>
                     </View>
                 </GlassView>
-            </View>
-        </Modal>
+        </AnimatedModal>
     );
 };
 
@@ -87,7 +78,7 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        backgroundColor: 'transparent',
         paddingHorizontal: 24,
     },
     modalContainer: {
