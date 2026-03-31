@@ -452,6 +452,17 @@ export const refetchTripActivities = async (tripId: string): Promise<void> => {
         return;
     }
 
+    // Fetch wallets
+    const { data: remoteWallets, error: walErr } = await supabase
+        .from('wallets')
+        .select('*')
+        .is('deleted_at', null)
+        .eq('trip_id', tripId);
+
+    if (walErr) {
+        console.error('[SyncEngine] refetchTripActivities pull wallets error:', walErr.message);
+    }
+
     const pulledActivities = (remoteActivities || []).map(a => ({ ...mapActivityFromDb(a), expenses: [] }));
     const pulledExpenses = (remoteExpenses || []).map(mapExpenseFromDb);
 
@@ -459,6 +470,7 @@ export const refetchTripActivities = async (tripId: string): Promise<void> => {
         _onRemoteUpdate({
             activities: pulledActivities,
             expenses: pulledExpenses,
+            wallets: remoteWallets || [],
             sharedTripIds: [tripId], // Safe now, scoping isolates the eviction
             currentUserId: auth.userId,
         });

@@ -95,7 +95,7 @@ function buildDeletePatch(incoming: Expense, state: StateSnapshot): HandlerResul
         const validExpenses = updatedExpenses.filter(e => 
             e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
         );
-        return { ...t, wallets: recomputeWalletSpent(updatedWallets, validExpenses) };
+        return { ...t, wallets: recomputeWalletSpent(updatedWallets, validExpenses, updatedActivities.filter(a => a.tripId === t.id)) };
     });
 
     console.log(`[SYNC] Expense ${incoming.id} deleted`);
@@ -181,7 +181,7 @@ function buildUpsertPatch(incoming: Expense, state: StateSnapshot): HandlerResul
             const validExpenses = updatedExpenses.filter(e => 
                 e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
             );
-            return { ...t, wallets: recomputeWalletSpent(updatedWallets, validExpenses) };
+            return { ...t, wallets: recomputeWalletSpent(updatedWallets, validExpenses, state.activities.filter(a => a.tripId === t.id)) };
         });
 
         const activityId = merged.activityId || local?.activityId;

@@ -8,7 +8,7 @@
  * [SYNC][MERGE][FIFO] prefixed logs for cross-device traceability.
  */
 import { useStore } from '../store/useStore';
-import { reverseFIFO, recomputeWalletSpent } from '../store/storeHelpers';
+import { recomputeWalletSpent } from '../store/storeHelpers';
 import { deleteRecord, upsertRecord } from '../storage/localDB';
 
 type PullPayload = {
@@ -48,28 +48,22 @@ function applyDeletions(tripIds?: string[], activityIds?: string[], expenseIds?:
 
     if (expenseIds?.length) {
         useStore.setState(s => {
-            const del      = new Set(expenseIds);
-            const toReverse = s.expenses.filter(e => del.has(e.id));
+            const del       = new Set(expenseIds);
             const remaining = s.expenses.filter(e => !del.has(e.id));
-            const affected  = new Set(toReverse.map(e => e.tripId));
+            const affected  = new Set(s.expenses.filter(e => del.has(e.id)).map(e => e.tripId));
 
+            // Wallet lots are authoritative from the server — do NOT apply reverseFIFO
+            // (local delta mutations). Recompute spentAmount purely from the remaining
+            // expense ledger; the next wallet pull will correct lot remainingAmounts.
             const updatedTrips = s.trips.map(t => {
                 if (!affected.has(t.id)) return t;
-                const forTrip = toReverse.filter(e => e.tripId === t.id);
-                let wallets = t.wallets.map((w: any) => {
-                    let lots = w.lots ?? [];
-                    for (const exp of forTrip.filter((e: any) => e.walletId === w.id))
-                        lots = reverseFIFO({ ...w, lots }, exp);
-                    return { ...w, lots };
-                });
                 const completedActivityIds = new Set(
                     s.activities.filter(a => a.tripId === t.id && a.isCompleted).map(a => a.id)
                 );
-                const validRemaining = remaining.filter(e => 
+                const validRemaining = remaining.filter(e =>
                     e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
                 );
-                wallets = recomputeWalletSpent(wallets, validRemaining);
-                return { ...t, wallets };
+                return { ...t, wallets: recomputeWalletSpent(t.wallets, validRemaining, s.activities.filter(a => a.tripId === t.id)) };
             });
             return {
                 expenses:   remaining,
@@ -152,7 +146,7 @@ function applyWallets(remoteWallets: any[]): void {
             const validExpenses = s.expenses.filter(e => 
                 e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
             );
-            return { ...t, wallets: recomputeWalletSpent(updatedWallets, validExpenses) };
+            return { ...t, wallets: recomputeWalletSpent(updatedWallets, validExpenses, s.activities.filter(a => a.tripId === t.id)) };
         });
 
         return { trips: updatedTrips };
@@ -227,7 +221,7 @@ function applyActivities(remote: any[], scopedTripIds?: string[]): void {
                 e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
             );
 
-            return { ...t, wallets: recomputeWalletSpent(t.wallets, validExpenses) };
+            return { ...t, wallets: recomputeWalletSpent(t.wallets, validExpenses, newActivities.filter(a => a.tripId === t.id)) };
         });
 
         return { activities: newActivities, trips: updatedTrips };
@@ -296,7 +290,7 @@ function applyExpenses(remote: any[], scopedTripIds?: string[]): void {
                 e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
             );
 
-            return { ...t, wallets: recomputeWalletSpent(t.wallets, validExpenses) };
+            return { ...t, wallets: recomputeWalletSpent(t.wallets, validExpenses, updatedActivities.filter(a => a.tripId === t.id)) };
         });
 
         return { expenses: allExpenses, activities: updatedActivities, trips: updatedTrips };
