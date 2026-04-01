@@ -2,7 +2,6 @@ import { Feather } from '@expo/vector-icons';
 import dayjs from 'dayjs';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    Dimensions,
     Modal,
     NativeScrollEvent,
     NativeSyntheticEvent,
@@ -27,6 +26,7 @@ interface GlassTimePickerProps {
 const ITEM_HEIGHT = 44;
 const VISIBLE_ITEMS = 3;
 const PICKER_HEIGHT = ITEM_HEIGHT * VISIBLE_ITEMS;
+const PERIODS = ['AM', 'PM'];
 
 export const GlassTimePicker: React.FC<GlassTimePickerProps> = ({
     visible,
@@ -47,7 +47,6 @@ export const GlassTimePicker: React.FC<GlassTimePickerProps> = ({
 
     const hours = Array.from({ length: 12 }, (_, i) => i + 1);
     const minutes = Array.from({ length: 60 }, (_, i) => i);
-    const periods = ['AM', 'PM'];
 
     useEffect(() => {
         if (!visible) return;
@@ -64,7 +63,7 @@ export const GlassTimePicker: React.FC<GlassTimePickerProps> = ({
 
             hourRef.current?.scrollTo({ x: 0, y: (hour - 1) * ITEM_HEIGHT, animated: false });
             minuteRef.current?.scrollTo({ x: 0, y: minute * ITEM_HEIGHT, animated: false });
-            periodRef.current?.scrollTo({ x: 0, y: periods.indexOf(period) * ITEM_HEIGHT, animated: false });
+            periodRef.current?.scrollTo({ x: 0, y: PERIODS.indexOf(period) * ITEM_HEIGHT, animated: false });
         }, 100);
 
         return () => clearTimeout(timer);
@@ -172,10 +171,10 @@ export const GlassTimePicker: React.FC<GlassTimePickerProps> = ({
                                     showsVerticalScrollIndicator={false}
                                     snapToInterval={ITEM_HEIGHT}
                                     decelerationRate="fast"
-                                    onMomentumScrollEnd={(e) => onScroll(e, setTempPeriod, periods)}
-                                    contentOffset={{ x: 0, y: periods.indexOf(tempPeriod) * ITEM_HEIGHT }}
+                                    onMomentumScrollEnd={(e) => onScroll(e, setTempPeriod, PERIODS)}
+                                    contentOffset={{ x: 0, y: PERIODS.indexOf(tempPeriod) * ITEM_HEIGHT }}
                                 >
-                                    {renderScrollItems(periods, tempPeriod)}
+                                    {renderScrollItems(PERIODS, tempPeriod)}
                                 </ScrollView>
                             </View>
                         </View>

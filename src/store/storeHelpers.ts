@@ -1,29 +1,16 @@
 import { Expense, Wallet, Activity } from '../types/models';
-import {
-    syncTrip, syncTripUpdate, syncTripDelete, syncTripHide,
-    syncActivity, syncActivityUpdate, syncActivityDelete,
-    syncExpense, syncExpenseUpdate, syncExpenseDelete,
-    syncExchangeEvent, syncWallet, syncWalletUpdate,
-} from '../sync/storeIntegration';
+import { persistTripHideLocally } from '../sync/storeIntegration';
 import { supabase } from '../utils/supabase';
 
 // ─── Helpers ───────────────────────────────────────────────────────
 
-/** Persist mutation to local DB + sync queue. Safe to call always. */
-export const offlineSync = {
-    trip: (data: any) => { try { syncTrip(data); } catch (e) { console.error('[Persist] trip:', e); } },
-    tripUpdate: (id: string, data: any) => { try { syncTripUpdate(id, data); } catch (e) { console.error('[Persist] tripUpdate:', e); } },
-    tripDelete: (id: string) => { try { syncTripDelete(id); } catch (e) { console.error('[Persist] tripDelete:', e); } },
-    tripHide: (id: string, data: any) => { try { syncTripHide(id, data); } catch (e) { console.error('[Persist] tripHide:', e); } },
-    activity: (data: any) => { try { syncActivity(data); } catch (e) { console.error('[Persist] activity:', e); } },
-    activityUpdate: (id: string, data: any) => { try { syncActivityUpdate(id, data); } catch (e) { console.error('[Persist] activityUpdate:', e); } },
-    activityDelete: (id: string) => { try { syncActivityDelete(id); } catch (e) { console.error('[Persist] activityDelete:', e); } },
-    expense: (data: any) => { try { syncExpense(data); } catch (e) { console.error('[Persist] expense:', e); } },
-    expenseUpdate: (id: string, data: any) => { try { syncExpenseUpdate(id, data); } catch (e) { console.error('[Persist] expenseUpdate:', e); } },
-    expenseDelete: (id: string) => { try { syncExpenseDelete(id); } catch (e) { console.error('[Persist] expenseDelete:', e); } },
-    exchangeEvent: (data: any) => { try { syncExchangeEvent(data); } catch (e) { console.error('[Persist] exchangeEvent:', e); } },
-    wallet: (data: any) => { try { syncWallet(data); } catch (e) { console.error('[Persist] wallet:', e); } },
-    walletUpdate: (id: string, data: any) => { try { syncWalletUpdate(id, data); } catch (e) { console.error('[Persist] walletUpdate:', e); } },
+/** Cache-only helper retained for device-local trip hiding after a successful cloud leave. */
+export const persistLocalTripHide = (id: string, data: any) => {
+    try {
+        persistTripHideLocally(id, data);
+    } catch (e) {
+        console.error('[Persist] tripHide:', e);
+    }
 };
 
 /** 
@@ -53,14 +40,36 @@ export const reverseFIFO = (wallet: Wallet, expense: Expense): Wallet['lots'] =>
 
     if (expense.lotBreakdown?.length) {
         const breakdownMap = new Map(expense.lotBreakdown.map(b => [b.lotId, b.amount]));
-        return lots.map(lot => {
+        let remainingFromBreakdown = 0;
+        for (const item of expense.lotBreakdown) remainingFromBreakdown += item.amount || 0;
+
+        const restoredFromBreakdown = lots.map(lot => {
             const restore = breakdownMap.get(lot.id);
             if (!restore) return lot;
+            remainingFromBreakdown = Number((remainingFromBreakdown - restore).toFixed(4));
             return {
                 ...lot,
                 remainingAmount: Number((lot.remainingAmount + restore).toFixed(4)),
             };
         });
+
+        // If none of the stored lot ids match the current wallet lots (or only a subset do),
+        // fall back to amount-based restoration for the unreconciled remainder.
+        if (remainingFromBreakdown <= 0) {
+            return restoredFromBreakdown;
+        }
+
+        const restored = [...restoredFromBreakdown];
+        let remaining = remainingFromBreakdown;
+        for (let i = restored.length - 1; i >= 0 && remaining > 0; i--) {
+            const lot = restored[i];
+            const capacity = Math.max(0, (lot.originalConvertedAmount ?? 0) - lot.remainingAmount);
+            if (capacity <= 0) continue;
+            const add = Math.min(remaining, capacity);
+            restored[i] = { ...lot, remainingAmount: Number((lot.remainingAmount + add).toFixed(4)) };
+            remaining = Number((remaining - add).toFixed(4));
+        }
+        return restored;
     }
 
     // Fallback: no lotBreakdown — restore by adding back to lots LIFO (newest first).
@@ -88,7 +97,7 @@ export const recomputeWalletSpent = (
     activities: Activity[] = []
 ): Wallet[] => {
     const spentByWallet = new Map<string, number>();
-    
+
     // Sum valid expenses
     for (const e of expenses) {
         spentByWallet.set(e.walletId, (spentByWallet.get(e.walletId) || 0) + (e.convertedAmountTrip || 0));

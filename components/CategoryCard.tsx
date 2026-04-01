@@ -79,6 +79,8 @@ export const CategoryCard = React.memo(({ title, spent, percentage, iconType }: 
     );
 });
 
+CategoryCard.displayName = 'CategoryCard';
+
 const styles = StyleSheet.create({
     container: {
         marginBottom: 12,

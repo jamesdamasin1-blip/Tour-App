@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback } from 'react';
-import { Modal, StyleSheet, View, TouchableOpacity, Dimensions, Platform } from 'react-native';
+import { Modal, StyleSheet, View, TouchableOpacity, Dimensions } from 'react-native';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -12,10 +12,9 @@ import Animated, {
 import { BlurView } from 'expo-blur';
 import { useStore } from '@/src/store/useStore';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+const { height: SCREEN_H } = Dimensions.get('window');
 
 const SPRING_IN = { damping: 18, stiffness: 180, mass: 0.8 };
-const SPRING_OUT = { damping: 22, stiffness: 260, mass: 0.7 };
 
 interface AnimatedModalProps {
     visible: boolean;
@@ -44,18 +43,18 @@ export function AnimatedModal({
     const openModal = useCallback(() => {
         setModalVisible(true);
         progress.value = withSpring(1, SPRING_IN);
-    }, []);
+    }, [progress]);
 
     const closeModal = useCallback(() => {
         progress.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) }, (fin) => {
             if (fin) runOnJS(setModalVisible)(false);
         });
-    }, []);
+    }, [progress]);
 
     useEffect(() => {
         if (visible) openModal();
         else if (modalVisible) closeModal();
-    }, [visible]);
+    }, [closeModal, modalVisible, openModal, visible]);
 
     const isBottom = origin === 'bottom';
 
@@ -136,7 +135,7 @@ export function StepTransition({ stepKey, direction = 'forward', children }: Ste
         // Animate in
         opacity.value = withSpring(1, { damping: 20, stiffness: 200, mass: 0.6 });
         translateX.value = withSpring(0, { damping: 20, stiffness: 200, mass: 0.6 });
-    }, [stepKey]);
+    }, [direction, opacity, stepKey, translateX]);
 
     const animStyle = useAnimatedStyle(() => ({
         opacity: opacity.value,

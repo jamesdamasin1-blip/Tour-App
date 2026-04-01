@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Pressable, ViewStyle, StyleProp, StyleSheet, View } from 'react-native';
+import { Pressable, ViewStyle, StyleProp, StyleSheet } from 'react-native';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -7,7 +7,6 @@ import Animated, {
     withTiming,
     withSequence,
     interpolate,
-    runOnJS,
     Easing,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
@@ -45,12 +44,12 @@ export function RippleButton({
     const handlePressIn = useCallback(() => {
         scale.value = withSpring(0.95, PRESS_SPRING);
         glowOpacity.value = withTiming(1, { duration: 150 });
-    }, []);
+    }, [glowOpacity, scale]);
 
     const handlePressOut = useCallback(() => {
         scale.value = withSpring(1, PRESS_SPRING);
         glowOpacity.value = withTiming(0, { duration: 400 });
-    }, []);
+    }, [glowOpacity, scale]);
 
     const handlePress = useCallback(() => {
         if (disabled) return;
@@ -69,7 +68,7 @@ export function RippleButton({
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         }
         onPress?.();
-    }, [disabled, onPress, haptic]);
+    }, [disabled, haptic, onPress, rippleProgress, scale]);
 
     const containerStyle = useAnimatedStyle(() => ({
         transform: [{ scale: scale.value }],

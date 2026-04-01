@@ -1,11 +1,11 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import dayjs from 'dayjs';
 import { useStore } from '@/src/store/useStore';
 import { Calculations as MathUtils } from '@/src/utils/mathUtils';
+import { buildTripDisplayFields } from '@/src/utils/tripDisplayFields';
 import { COUNTRY_CURRENCY_MAPPING } from '@/src/data/currencyMapping';
-import { CurrencyService } from '../../../services/currency';
-import { TripPlan } from '@/src/types/models';
+import { syncTrace } from '@/src/sync/debug';
 
 export const useCreatePlan = () => {
     const router = useRouter();
@@ -29,6 +29,7 @@ export const useCreatePlan = () => {
     const [countries, setCountries] = useState<string[]>([]);
     
     const [validationMessage, setValidationMessage] = useState<string | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
     const [titleError, setTitleError] = useState(false);
     const [homeCountryError, setHomeCountryError] = useState(false);
     const [durationError, setDurationError] = useState(false);
@@ -64,6 +65,8 @@ export const useCreatePlan = () => {
         }
     }
 
+    const existingTrip = isEditing ? trips.find(t => t.id === editId) : null;
+
     // Sync wallet budget/rate maps when countries change — helper used by event handlers
     const syncBudgetMaps = (newCountries: string[]) => {
         setWalletBudgets(prev => {
@@ -86,7 +89,18 @@ export const useCreatePlan = () => {
         });
     };
 
-    const handleStart = () => {
+    const handleStart = async () => {
+        if (isSaving) return;
+        syncTrace('CreatePlan', 'handle_start_pressed', {
+            isEditing,
+            editId: editId || null,
+            title: title.trim(),
+            homeCountry,
+            homeCurrency,
+            countries,
+            hasStartDate: !!startDate,
+            hasEndDate: !!endDate,
+        });
         let hasError = false;
         setTitleError(false);
         setHomeCountryError(false);
@@ -114,11 +128,16 @@ export const useCreatePlan = () => {
         setBudgetErrors(currentBudgetErrors);
 
         if (hasError) {
+            syncTrace('CreatePlan', 'validation_failed', {
+                titleMissing: !title.trim(),
+                homeCountryMissing: !homeCountry,
+                durationMissing: !startDate || !endDate,
+                countriesMissing: countries.length === 0,
+                budgetErrors: currentBudgetErrors,
+            });
             setValidationMessage('Please properly fill the highlighted fields.');
             return;
         }
-
-        const existingTrip = isEditing ? trips.find(t => t.id === editId) : null;
 
         const wallets = countries.map(c => {
             const currency = COUNTRY_CURRENCY_MAPPING[c] || 'USD';
@@ -135,8 +154,9 @@ export const useCreatePlan = () => {
                 const oldBudget = existingWallet.totalBudget || 0;
                 const delta = budget - oldBudget;
 
-                const adjustedLots = (existingWallet.lots || []).map((lot: any) => {
-                    if (lot.isDefault) {
+                const adjustedLots = (existingWallet.lots || []).map((lot: any, index: number) => {
+                    const isInitialLot = lot.entryKind === 'initial' || (index === 0 && !lot.entryKind);
+                    if (isInitialLot) {
                         return {
                             ...lot,
                             originalConvertedAmount: budget,
@@ -174,12 +194,14 @@ export const useCreatePlan = () => {
                     remainingAmount: budget,
                     lockedRate: baselineRate,
                     rateBaseCurrency: 1, // source IS home, multiplier is 1
+                    entryKind: 'initial',
                     isDefault: true, // first lot is always default
                     createdAt: Date.now()
                 }]
             };
         });
 
+        const tripDisplayFields = buildTripDisplayFields(wallets as any, homeCurrency);
         const tripData: any = {
             title: title.trim(),
             startDate: startDate!.valueOf(),
@@ -188,18 +210,37 @@ export const useCreatePlan = () => {
             homeCountry,
             homeCurrency,
             wallets,
-            totalBudgetHomeCached: wallets.reduce((acc, w) => {
-                const rateToHome = w.baselineExchangeRate || (1 / (w.defaultRate || 1));
-                return acc + (w.totalBudget * rateToHome);
-            }, 0),
+            ...tripDisplayFields,
         };
 
-        if (isEditing && editId) {
-            updateTrip(editId, tripData);
-            router.back();
-        } else {
-            const newId = addTrip(tripData);
-            router.replace(`/trip/${newId}` as any);
+        try {
+            setIsSaving(true);
+            syncTrace('CreatePlan', 'save_started', {
+                isEditing,
+                editId: editId || null,
+                countries,
+                walletCount: wallets.length,
+                totalBudgetHomeCached: tripData.totalBudgetHomeCached,
+            });
+            if (isEditing && editId) {
+                await updateTrip(editId, tripData);
+                syncTrace('CreatePlan', 'update_trip_resolved', { tripId: editId });
+                router.back();
+            } else {
+                const newId = await addTrip(tripData);
+                syncTrace('CreatePlan', 'add_trip_resolved', { tripId: newId });
+                router.replace(`/trip/${newId}` as any);
+                syncTrace('CreatePlan', 'navigate_to_trip', { tripId: newId });
+            }
+        } catch (error: any) {
+            syncTrace('CreatePlan', 'save_failed', {
+                message: error?.message || String(error),
+                code: error?.code || null,
+            });
+            setValidationMessage(error?.message || 'Unable to save trip right now.');
+        } finally {
+            setIsSaving(false);
+            syncTrace('CreatePlan', 'save_finished', { isEditing, editId: editId || null });
         }
     };
 
@@ -207,7 +248,7 @@ export const useCreatePlan = () => {
         state: {
             title, homeCountry, homeCurrency, startDate, endDate, countries,
             walletBudgets, walletHomeBudgets, walletRates,
-            isDark, isEditing, validationMessage, titleError, homeCountryError, durationError, countriesError, budgetErrors
+            isDark, isEditing, validationMessage, titleError, homeCountryError, durationError, countriesError, budgetErrors, isSaving
         },
         actions: {
             setTitle,

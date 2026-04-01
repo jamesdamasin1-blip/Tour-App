@@ -10,6 +10,8 @@
  * `wallets` for partial updates — callers must merge with existing local state.
  */
 import type { TripPlan } from '../types/models';
+import { ensureDistinctMemberColors } from '../utils/memberAttribution';
+import { buildTripDisplayFields } from '../utils/tripDisplayFields';
 
 /** Convert a DB value to a safe finite number (never NaN/Infinity). */
 const safeNum = (v: unknown, fallback = 0): number => {
@@ -45,7 +47,7 @@ export function mapTripFromDb(row: Record<string, any>): Partial<TripPlan> & { i
     if ('total_budget_home_cached' in row)
         base.totalBudgetHomeCached = safeNum(row.total_budget_home_cached);
     if ('countries' in row) base.countries = row.countries ?? [];
-    if ('members' in row) base.members = row.members ?? [];
+    if ('members' in row) base.members = ensureDistinctMemberColors(row.members ?? []);
     if ('removed_member_user_ids' in row)
         base.removedMemberUserIds = row.removed_member_user_ids ?? [];
     if ('is_completed' in row) base.isCompleted = row.is_completed ?? false;
@@ -62,13 +64,7 @@ export function mapTripFromDb(row: Record<string, any>): Partial<TripPlan> & { i
     // Wallet-derived aggregates — always recompute when wallets are present.
     if (hasWallets) {
         base.wallets = wallets;
-        base.tripCurrency = wallets[0]?.currency ?? row.home_currency;
-        base.totalBudgetTrip = wallets[0]?.totalBudget ?? 0;
-        base.totalBudget = wallets.reduce(
-            (acc: number, w: any) => acc + (w.totalBudget / (w.defaultRate || 1)),
-            0
-        );
-        base.currency = wallets[0]?.currency ?? row.home_currency;
+        Object.assign(base, buildTripDisplayFields(wallets, row.home_currency));
     }
 
     return base;
@@ -93,7 +89,6 @@ export function mapTripToDb(data: Partial<TripPlan> & { id: string }): Record<st
         spontaneous_events: data.spontaneousEvents ?? [],
         countries: data.countries,
         members: data.members,
-        removed_member_user_ids: data.removedMemberUserIds ?? [],
         is_completed: data.isCompleted,
         last_modified: data.lastModified,
         field_updates: data.fieldUpdates,

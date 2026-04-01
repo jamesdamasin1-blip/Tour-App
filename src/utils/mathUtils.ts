@@ -90,7 +90,7 @@ export const Calculations = {
                 currency: safeCurrency,
                 maximumFractionDigits: 2
             }).format(safeValue);
-        } catch (e) {
+        } catch {
             return `${safeCurrency} ${safeValue.toFixed(2)}`;
         }
     },

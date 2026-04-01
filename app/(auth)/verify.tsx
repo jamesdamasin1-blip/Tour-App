@@ -11,9 +11,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { MeshBackground } from '@/components/MeshBackground';
 import { GlassView } from '@/components/GlassView';
 import { useTheme } from '@/src/hooks/useTheme';
-import { resendVerification, getAuthState, linkLocalDataToUser } from '@/src/auth/googleAuth';
-import { supabase } from '@/src/utils/supabase';
-import { startSyncLoop, runSync } from '@/src/sync/syncEngine';
+import { resendVerification, getAuthState, onAuthStateChange } from '@/src/auth/googleAuth';
+import { bootstrapAuthState } from '@/src/auth/authRuntime';
 
 export default function VerifyScreen() {
     const { isDark } = useTheme();
@@ -32,19 +31,14 @@ export default function VerifyScreen() {
 
     // Listen for auth state change (user clicks verification link, app resumes)
     useEffect(() => {
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {
-            if (event === 'SIGNED_IN') {
-                const authState = await getAuthState();
-                if (authState.isAuthenticated && authState.userId) {
-                    linkLocalDataToUser(authState.userId);
-                    startSyncLoop();
-                    runSync().catch(console.error);
-                    router.replace('/(tabs)');
-                }
+        const unsubscribe = onAuthStateChange((state) => {
+            if (state.isAuthenticated && state.userId) {
+                bootstrapAuthState(state, { triggerSync: true });
+                router.replace('/(tabs)');
             }
         });
 
-        return () => subscription.unsubscribe();
+        return unsubscribe;
     }, []);
 
     const handleResend = async () => {
@@ -64,9 +58,7 @@ export default function VerifyScreen() {
     const handleCheckManually = async () => {
         const authState = await getAuthState();
         if (authState.isAuthenticated && authState.userId) {
-            linkLocalDataToUser(authState.userId);
-            startSyncLoop();
-            runSync().catch(console.error);
+            bootstrapAuthState(authState, { triggerSync: true });
             router.replace('/(tabs)');
         } else {
             setError('Email not yet verified. Check your inbox.');
@@ -98,7 +90,7 @@ export default function VerifyScreen() {
                         onPress={handleCheckManually}
                         activeOpacity={0.8}
                     >
-                        <Text style={styles.checkButtonText}>I've Verified</Text>
+                        <Text style={styles.checkButtonText}>{"I've Verified"}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity

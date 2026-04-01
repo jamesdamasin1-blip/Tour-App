@@ -1,156 +1,136 @@
 import { StateCreator } from 'zustand';
 import { ExchangeEvent } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
-import { addFundingLot, getFundingTotalGlobalHome } from '../../finance/wallet/walletEngine';
-import { offlineSync, stampFieldUpdates } from '../storeHelpers';
+import {
+    beginTripCloudMutation,
+    endTripCloudMutation,
+    fetchTripCloudBundle,
+    refreshTripCloudState,
+} from '../cloudSyncHelpers';
+import { syncTrace, summarizeFundingEvent, summarizeTrip, summarizeWallet } from '../../sync/debug';
+import { stampFieldUpdates, supabase } from '../storeHelpers';
 import type { AppState } from '../useStore';
 
 export interface ExchangeEventSlice {
     exchangeEvents: ExchangeEvent[];
-    addExchangeEvent: (event: Omit<ExchangeEvent, 'id'>) => void;
-    updateExchangeEvent: (id: string, data: Partial<Omit<ExchangeEvent, 'id' | 'tripId'>>) => void;
-    deleteExchangeEvent: (id: string) => void;
+    addExchangeEvent: (event: Omit<ExchangeEvent, 'id'>) => Promise<void>;
+    updateExchangeEvent: (id: string, data: Partial<Omit<ExchangeEvent, 'id' | 'tripId'>>) => Promise<void>;
+    deleteExchangeEvent: (id: string) => Promise<void>;
 }
 
-export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEventSlice> = (set) => ({
+export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEventSlice> = (_set, get) => ({
     exchangeEvents: [],
 
-    addExchangeEvent: (eventData) =>
-        set((state: any) => {
-            const id = generateId();
-            const trip = state.trips.find((t: any) => t.id === eventData.tripId);
-            const wallet = trip?.wallets.find((w: any) => w.id === eventData.walletId);
+    addExchangeEvent: async (eventData) => {
+        beginTripCloudMutation(eventData.tripId);
+        try {
+        syncTrace('BudgetMutation', 'submit_add', { tripId: eventData.tripId, walletId: eventData.walletId, eventData });
+        const localTrip = get().trips.find(trip => trip.id === eventData.tripId);
+        const localWallet = localTrip?.wallets.find(wallet => wallet.id === eventData.walletId);
+        const wallet = localWallet ?? (await fetchTripCloudBundle(eventData.tripId))?.wallets.find(existing => existing.id === eventData.walletId);
+        if (!wallet) {
+            syncTrace('BudgetMutation', 'missing_wallet_for_add', { tripId: eventData.tripId, walletId: eventData.walletId });
+            return;
+        }
+        syncTrace('BudgetMutation', 'resolved_wallet_for_add', {
+            trip: summarizeTrip(localTrip),
+            wallet: summarizeWallet(wallet),
+        });
 
-            if (!wallet) return state;
+        const lastModified = Date.now();
+        const newEvent: ExchangeEvent = {
+            ...eventData,
+            id: generateId(),
+            version: 1,
+            deletedAt: null,
+            fieldUpdates: stampFieldUpdates({}, eventData as Record<string, unknown>, lastModified),
+        };
+        const { error: eventErr } = await supabase.rpc('add_funding_event_cloud', {
+            p_event: { ...newEvent, id: undefined, lastModified },
+        });
+        if (eventErr) throw eventErr;
+        syncTrace('BudgetMutation', 'rpc_add_success', summarizeFundingEvent(newEvent));
 
-            const updatedWallet = addFundingLot(wallet, {
-                sourceCurrency: trip.homeCurrency || 'PHP',
-                targetCurrency: wallet.currency,
-                sourceAmount: eventData.homeAmount,
-                rate: eventData.rate,
-                rateBaseCurrency: 1,
-                notes: eventData.notes
-            });
-            (updatedWallet as any).fieldUpdates = stampFieldUpdates(wallet.fieldUpdates, { lots: updatedWallet.lots }, Date.now());
+        await refreshTripCloudState(eventData.tripId);
+        syncTrace('BudgetMutation', 'refresh_after_add_done', { tripId: eventData.tripId });
+        } finally {
+            endTripCloudMutation(eventData.tripId);
+        }
+    },
 
-            let updatedTrips = state.trips.map((t: any) =>
-                t.id === eventData.tripId ? {
-                    ...t,
-                    lastModified: Date.now(),
-                    wallets: t.wallets.map((w: any) =>
-                        w.id === eventData.walletId ? updatedWallet : w
-                    )
-                } : t
-            );
+    updateExchangeEvent: async (id, data) => {
+        const tripId = await resolveTripIdForEvent(id, get().exchangeEvents);
+        if (!tripId) return;
 
-            updatedTrips = updatedTrips.map((t: any) => {
-                if (t.id === eventData.tripId) {
-                    const totalBudgetHomeCached = t.wallets.reduce((sum: number, w: any) => {
-                        return sum + getFundingTotalGlobalHome(w, t.homeCurrency || 'PHP');
-                    }, 0);
+        beginTripCloudMutation(tripId);
+        try {
+            syncTrace('BudgetMutation', 'submit_update', { tripId, eventId: id, patch: data });
+            const localEvent = get().exchangeEvents.find(existing => existing.id === id);
+            const bundle = localEvent ? null : await fetchTripCloudBundle(tripId);
+            const event = localEvent ?? bundle?.fundingLots.find(existing => existing.id === id);
+            if (!event) {
+                syncTrace('BudgetMutation', 'missing_event_for_update', { tripId, eventId: id });
+                return;
+            }
 
-                    const newTrip = {
-                        ...t,
-                        totalBudgetHomeCached: Math.round(totalBudgetHomeCached * 100) / 100
-                    };
-                    newTrip.fieldUpdates = stampFieldUpdates(t.fieldUpdates, { totalBudgetHomeCached: newTrip.totalBudgetHomeCached }, Date.now());
-                    return newTrip;
-                }
-                return t;
-            });
-
-            const newEvent = { ...eventData, id, version: 1, deletedAt: null };
-            newEvent.fieldUpdates = stampFieldUpdates({}, { ...newEvent });
-            offlineSync.exchangeEvent(newEvent);
-            offlineSync.walletUpdate(eventData.walletId, updatedWallet);
-
-            // CRITICAL: Persist the parent trip as well, so the JSONB cache mirrors the wallet addition on pullRemoteUpdates!
-            const updatedTrip = updatedTrips.find((t: any) => t.id === eventData.tripId);
-            if (updatedTrip) offlineSync.tripUpdate(eventData.tripId, updatedTrip);
-
-            return {
-                exchangeEvents: [...state.exchangeEvents, newEvent],
-                trips: updatedTrips
+            if (data.walletId && data.walletId !== event.walletId) {
+                throw new Error('Move budget entries by deleting and re-adding them to another wallet.');
+            }
+            const lastModified = Date.now();
+            const updatedEvent = {
+                ...event,
+                ...data,
+                fieldUpdates: stampFieldUpdates(event.fieldUpdates, data as Record<string, unknown>, lastModified),
+                lastModified,
             };
-        }),
-
-    deleteExchangeEvent: (id) =>
-        set((state: any) => {
-            const event = state.exchangeEvents.find((e: any) => e.id === id);
-            if (!event) return state;
-
-            const updatedEvents = state.exchangeEvents.filter((e: any) => e.id !== id);
-
-            const updatedTrips = state.trips.map((t: any) => {
-                if (t.id === event.tripId) {
-                    const initialBudgetHome = t.wallets.reduce((sum: number, w: any) => {
-                        const rate = w.baselineExchangeRate || (w.defaultRate ? (1 / w.defaultRate) : 1);
-                        return sum + (w.totalBudget * rate);
-                    }, 0);
-
-                    const addedBudgetHome = updatedEvents
-                        .filter((e: any) => e.tripId === t.id)
-                        .reduce((sum: number, e: any) => sum + e.homeAmount, 0);
-
-                    const newTrip = {
-                        ...t,
-                        totalBudgetHomeCached: Math.round((initialBudgetHome + addedBudgetHome) * 100) / 100,
-                        lastModified: Date.now()
-                    };
-                    newTrip.fieldUpdates = stampFieldUpdates(t.fieldUpdates, { totalBudgetHomeCached: newTrip.totalBudgetHomeCached }, newTrip.lastModified);
-                    return newTrip;
-                }
-                return t;
+            const { error: eventErr } = await supabase.rpc('update_funding_event_cloud', {
+                p_event_id: id,
+                p_event: updatedEvent,
             });
+            if (eventErr) throw eventErr;
+            syncTrace('BudgetMutation', 'rpc_update_success', summarizeFundingEvent(updatedEvent));
 
-            // Persist the updated trip (wallet budget changed)
-            const updatedTrip = updatedTrips.find((t: any) => t.id === event.tripId);
-            if (updatedTrip) offlineSync.tripUpdate(event.tripId, updatedTrip);
+            await refreshTripCloudState(tripId);
+            syncTrace('BudgetMutation', 'refresh_after_update_done', { tripId, eventId: id });
+        } finally {
+            endTripCloudMutation(tripId);
+        }
+    },
 
-            return {
-                exchangeEvents: updatedEvents,
-                trips: updatedTrips
-            };
-        }),
+    deleteExchangeEvent: async (id) => {
+        const tripId = await resolveTripIdForEvent(id, get().exchangeEvents);
+        if (!tripId) return;
 
-    updateExchangeEvent: (id, data) =>
-        set((state: any) => {
-            const event = state.exchangeEvents.find((e: any) => e.id === id);
-            if (!event) return state;
-
-            const updatedEvents = state.exchangeEvents.map((e: any) => e.id === id ? { ...e, ...data, fieldUpdates: stampFieldUpdates(e.fieldUpdates, data, Date.now()) } : e);
-
-            const updatedTrips = state.trips.map((t: any) => {
-                if (t.id === event.tripId) {
-                    const initialBudgetHome = t.wallets.reduce((sum: number, w: any) => {
-                        const rate = w.baselineExchangeRate || (w.defaultRate ? (1 / w.defaultRate) : 1);
-                        return sum + (w.totalBudget * rate);
-                    }, 0);
-
-                    const addedBudgetHome = updatedEvents
-                        .filter((e: any) => e.tripId === t.id)
-                        .reduce((sum: number, e: any) => sum + e.homeAmount, 0);
-
-                    const newTrip = {
-                        ...t,
-                        totalBudgetHomeCached: Math.round((initialBudgetHome + addedBudgetHome) * 100) / 100,
-                        lastModified: Date.now()
-                    };
-                    newTrip.fieldUpdates = stampFieldUpdates(t.fieldUpdates, { totalBudgetHomeCached: newTrip.totalBudgetHomeCached }, newTrip.lastModified);
-                    return newTrip;
-                }
-                return t;
+        beginTripCloudMutation(tripId);
+        try {
+            syncTrace('BudgetMutation', 'submit_delete', { tripId, eventId: id });
+            const { error: eventErr } = await supabase.rpc('delete_funding_event_cloud', {
+                p_event_id: id,
             });
+            if (eventErr) throw eventErr;
+            syncTrace('BudgetMutation', 'rpc_delete_success', { tripId, eventId: id });
 
-            // Persist the updated event + trip
-            const updatedEvent = updatedEvents.find((e: any) => e.id === id);
-            if (updatedEvent) offlineSync.exchangeEvent(updatedEvent);
-            const updatedTrip = updatedTrips.find((t: any) => t.id === event.tripId);
-            if (updatedTrip) offlineSync.tripUpdate(event.tripId, updatedTrip);
-
-            return {
-                exchangeEvents: updatedEvents,
-                trips: updatedTrips
-            };
-        }),
+            await refreshTripCloudState(tripId);
+            syncTrace('BudgetMutation', 'refresh_after_delete_done', { tripId, eventId: id });
+        } finally {
+            endTripCloudMutation(tripId);
+        }
+    },
 });
+
+const resolveTripIdForEvent = async (
+    eventId: string,
+    localEvents: ExchangeEvent[]
+): Promise<string | null> => {
+    const localEvent = localEvents.find(event => event.id === eventId);
+    if (localEvent?.tripId) return localEvent.tripId;
+
+    const { data, error } = await supabase
+        .from('funding_lots')
+        .select('trip_id')
+        .eq('id', eventId)
+        .maybeSingle();
+
+    if (error) throw error;
+    return data?.trip_id || null;
+};

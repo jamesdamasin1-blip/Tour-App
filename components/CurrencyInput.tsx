@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View, Modal } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useStore } from '@/src/store/useStore';

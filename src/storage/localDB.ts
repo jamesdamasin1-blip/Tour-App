@@ -142,12 +142,15 @@ export const upsertRecord = (
     assertValidColumns(cols);
     const extraCols = cols.length ? ', ' + cols.join(', ') : '';
     const extraPlaceholders = cols.length ? ', ' + cols.map(() => '?').join(', ') : '';
+    const extraConflictUpdates = cols.length
+        ? ', ' + cols.map(col => `${col}=excluded.${col}`).join(', ')
+        : '';
     const extraVals = cols.map(k => extra[k]);
 
     db.runSync(
         `INSERT INTO ${table} (id, data, syncStatus, createdAt, updatedAt${extraCols})
          VALUES (?, ?, 'pending', ?, ?${extraPlaceholders})
-         ON CONFLICT(id) DO UPDATE SET data=?, syncStatus='pending', updatedAt=?`,
+         ON CONFLICT(id) DO UPDATE SET data=?, syncStatus='pending', updatedAt=?${extraConflictUpdates}`,
         [id, json, now, now, ...extraVals, json, now]
     );
 };
@@ -173,6 +176,14 @@ export const getAllRecords = <T>(table: string, whereColumn?: string, params?: a
     }
     const rows = db.getAllSync<{ data: string }>(sql, params || []);
     return rows.map(r => JSON.parse(r.data));
+};
+
+export const getHiddenTripIds = (): string[] => {
+    const db = getDB();
+    const rows = db.getAllSync<{ id: string }>(
+        `SELECT id FROM trips WHERE isHidden = 1`
+    );
+    return rows.map(row => row.id);
 };
 
 export const deleteRecord = (table: string, id: string) => {

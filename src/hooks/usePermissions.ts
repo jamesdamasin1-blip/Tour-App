@@ -1,14 +1,15 @@
 import { useMemo } from 'react';
 import { useStore } from '@/src/store/useStore';
 import { useAuth } from './useAuth';
+import { findCurrentTripMember, getDisplayTripMembers } from '@/src/utils/memberAttribution';
 
 export function usePermissions(tripId: string) {
     const trips = useStore(state => state.trips);
-    const { userId } = useAuth();
+    const { userId, email } = useAuth();
 
     return useMemo(() => {
         const trip = trips.find(t => t.id === tripId);
-        const members = trip?.members || [];
+        const members = getDisplayTripMembers(trip);
 
         // Solo trip (no members ever added) — current user is always the creator
         if (members.length === 0) {
@@ -21,9 +22,7 @@ export function usePermissions(tripId: string) {
         }
 
         // Find current user's member record
-        const currentMember = userId
-            ? members.find(m => m.userId === userId) || members.find(m => m.isCreator) || null
-            : members.find(m => m.isCreator) || null;
+        const currentMember = findCurrentTripMember(trip, { userId, email });
 
         // isCreator via member record, OR fallback: if no member record found but the trip was
         // created locally (role is undefined — imported trips always have role='admin'/'viewer'),
@@ -40,5 +39,5 @@ export function usePermissions(tripId: string) {
         const canManageMembers = isCreator;
 
         return { currentMember, isCreator, canEdit, canManageMembers };
-    }, [trips, tripId, userId]);
+    }, [email, trips, tripId, userId]);
 }

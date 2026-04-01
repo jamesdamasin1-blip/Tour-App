@@ -15,8 +15,8 @@ import { MeshBackground } from '@/components/MeshBackground';
 import { GlassView } from '@/components/GlassView';
 import { AuthLoadingOverlay } from '@/components/AuthLoadingOverlay';
 import { useTheme } from '@/src/hooks/useTheme';
-import { signInWithGoogle, linkLocalDataToUser, onAuthStateChange } from '@/src/auth/googleAuth';
-import { startSyncLoop, runSync } from '@/src/sync/syncEngine';
+import { signInWithGoogle, onAuthStateChange } from '@/src/auth/googleAuth';
+import { bootstrapAuthState } from '@/src/auth/authRuntime';
 import { setSyncMeta } from '@/src/storage/localDB';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -36,9 +36,7 @@ export default function AuthEntryScreen() {
             if (!googlePendingRef.current) return;
             if (state.isAuthenticated && state.userId) {
                 googlePendingRef.current = false;
-                linkLocalDataToUser(state.userId);
-                startSyncLoop();
-                runSync().catch(console.error);
+                bootstrapAuthState(state, { triggerSync: true });
                 setLoading(null);
                 setTransitioning(true);
                 setTimeout(() => {
@@ -71,9 +69,7 @@ export default function AuthEntryScreen() {
             // Fast path: openAuthSessionAsync captured the redirect directly
             if (authState.isAuthenticated && authState.userId) {
                 googlePendingRef.current = false;
-                linkLocalDataToUser(authState.userId);
-                startSyncLoop();
-                runSync().catch(console.error);
+                bootstrapAuthState(authState, { triggerSync: true });
                 setLoading(null);
                 setTransitioning(true);
                 setTimeout(() => {

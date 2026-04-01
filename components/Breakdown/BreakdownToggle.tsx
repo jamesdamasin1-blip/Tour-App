@@ -78,3 +78,5 @@ export const BreakdownToggle = React.memo(({ mode, onChange, totals, currency }:
         </View>
     );
 });
+
+BreakdownToggle.displayName = 'BreakdownToggle';

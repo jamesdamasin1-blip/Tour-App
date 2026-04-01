@@ -1,6 +1,5 @@
-import { Feather } from '@expo/vector-icons';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useStore } from '../src/store/useStore';
 import { GlassView } from './GlassView';
 import { AnimatedModal } from './AnimatedModal';
@@ -32,13 +31,7 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     const { theme } = useStore();
     const isDark = theme === 'dark';
     
-    const isDelete = type === 'delete';
-    const isEdit = type === 'edit';
-
-    const iconName = isDelete ? 'trash-2' : isEdit ? 'edit-2' : 'alert-circle';
-    const iconColor = isDelete ? '#FF3B30' : isEdit ? '#3b82f6' : '#5D6D54';
-    const iconBgColor = isDelete ? '#FFE5E5' : isEdit ? '#E5F1FF' : 'rgba(158, 178, 148, 0.15)';
-    const confirmBgColor = isDelete ? '#ef4444' : isEdit ? '#3b82f6' : '#5D6D54';
+    const confirmBgColor = type === 'delete' ? '#ef4444' : type === 'edit' ? '#3b82f6' : '#5D6D54';
 
     return (
         <AnimatedModal visible={visible} onClose={onClose}>
@@ -74,27 +67,12 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
 };
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: 'transparent',
-        paddingHorizontal: 24,
-    },
     modalContainer: {
         width: '100%',
         padding: 24,
     },
     content: {
         alignItems: 'center',
-    },
-    iconWrapper: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 16,
     },
     title: {
         fontSize: 20,

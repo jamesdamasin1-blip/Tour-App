@@ -1,47 +1,59 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { 
+    ActivityIndicator,
     KeyboardAvoidingView, 
     Platform, 
     ScrollView, 
     StyleSheet, 
     Text, 
-    TextInput, 
     TouchableOpacity, 
     View, 
-    Modal, 
-    FlatList 
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BottomFade } from '@/components/BottomFade';
 import { CurrencyInput } from '@/components/CurrencyInput';
 import { GlassView } from '@/components/GlassView';
 import { Header } from '@/components/Header';
 import { MeshBackground } from '@/components/MeshBackground';
 
 import { useAddExpense } from '@/src/features/activity/hooks/useAddExpense';
+import {
+    PRIMARY_ACTION_HEIGHT,
+    PRIMARY_ACTION_RADIUS,
+    PRIMARY_ACTION_TEXT_SIZE,
+} from '@/src/styles/primaryAction';
 
 export default function AddExpenseScreen() {
     const activityId = useLocalSearchParams<{ activityId: string }>().activityId;
     const insets = useSafeAreaInsets();
+    const [showBottomFade, setShowBottomFade] = useState(false);
     
     const {
         // State
         amount, setAmount,
         currency, setCurrency,
-        isCurrencyModalVisible, setIsCurrencyModalVisible,
+        isSaving,
         
         // Data
         isDark, isAdmin,
         activity,
-        tripCurrency, homeCurrency,
         availableCurrencies,
-        conversions,
+        amountValidationError,
+        amountHelperText,
         
         // Actions
         handleSave
     } = useAddExpense(activityId);
+
+    const handleScroll = useCallback((event: any) => {
+        const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+        const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 40;
+        const isScrollable = contentSize.height > layoutMeasurement.height;
+        setShowBottomFade(isScrollable && !isCloseToBottom);
+    }, []);
 
     if (!activity) {
         return (
@@ -62,6 +74,8 @@ export default function AddExpenseScreen() {
                 <ScrollView 
                     contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 24, paddingBottom: insets.bottom + 40 }} 
                     showsVerticalScrollIndicator={false}
+                    onScroll={handleScroll}
+                    scrollEventThrottle={16}
                 >
                     <GlassView
                         style={[styles.cardContainer, isDark && { shadowColor: '#000' }]}
@@ -86,22 +100,28 @@ export default function AddExpenseScreen() {
                                 options={availableCurrencies}
                                 editable={isAdmin}
                                 placeholder="0.00"
+                                error={amountValidationError}
+                                helperText={amountHelperText}
                             />
 
 
 
                             <TouchableOpacity
                                 onPress={handleSave}
-                                disabled={!isAdmin || amount === ''}
+                                disabled={isSaving || !isAdmin || amount === '' || !!amountValidationError}
                                 style={[
                                     styles.saveButton,
                                     { backgroundColor: isDark ? '#B2C4AA' : '#5D6D54' },
-                                    (!isAdmin || amount === '') && { opacity: 0.5 }
-                                ]}
-                            >
-                                <Text style={[styles.saveButtonText, { color: isDark ? '#1a1a1a' : 'white' }]}>
-                                    {isAdmin ? 'SAVE EXPENSE' : 'VIEW ONLY'}
-                                </Text>
+                                (isSaving || !isAdmin || amount === '' || !!amountValidationError) && { opacity: 0.5 }
+                            ]}
+                        >
+                                {isSaving ? (
+                                    <ActivityIndicator color={isDark ? '#1a1a1a' : '#FFFFFF'} size="small" />
+                                ) : (
+                                    <Text style={[styles.saveButtonText, { color: isDark ? '#1a1a1a' : 'white' }]}>
+                                        {isAdmin ? 'SAVE EXPENSE' : 'VIEW ONLY'}
+                                    </Text>
+                                )}
                             </TouchableOpacity>
                         </View>
                     </GlassView>
@@ -109,6 +129,8 @@ export default function AddExpenseScreen() {
 
 
             </KeyboardAvoidingView>
+
+            <BottomFade visible={showBottomFade} height={170} />
         </MeshBackground>
     );
 }
@@ -126,8 +148,8 @@ const styles = StyleSheet.create({
     manualTextInput: { flex: 1, fontSize: 16, fontWeight: '700', marginLeft: 12 },
     previewContainer: { padding: 16, borderRadius: 20, borderWidth: 1, borderStyle: 'dashed' },
     previewLabel: { fontSize: 9, fontWeight: '900', letterSpacing: 1, marginBottom: 4 },
-    saveButton: { borderRadius: 20, paddingVertical: 18, alignItems: 'center', marginTop: 12 },
-    saveButtonText: { fontWeight: '900', fontSize: 16, letterSpacing: 1.5, textTransform: 'uppercase' },
+    saveButton: { height: PRIMARY_ACTION_HEIGHT, borderRadius: PRIMARY_ACTION_RADIUS, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
+    saveButtonText: { fontWeight: '900', fontSize: PRIMARY_ACTION_TEXT_SIZE, letterSpacing: 2, textTransform: 'uppercase' },
     currencyItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: 'transparent', marginBottom: 8 },
     currencyItemText: { fontSize: 18, fontWeight: '900' }
 });

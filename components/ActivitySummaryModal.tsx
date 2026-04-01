@@ -1,10 +1,12 @@
 import { GlassView } from '@/components/GlassView';
+import { AnimatedValueText } from '@/components/AnimatedValueText';
 import { Activity } from '@/src/types/models';
 import { useStore } from '../src/store/useStore';
 import { Calculations } from '@/src/utils/mathUtils';
+import { findAttributedMember } from '@/src/utils/memberAttribution';
 import { Feather } from '@expo/vector-icons';
 import React from 'react';
-import { Animated, Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Dimensions, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { AnimatedModal } from './AnimatedModal';
 
 interface ActivitySummaryModalProps {
@@ -46,9 +48,8 @@ export function ActivitySummaryModal({
     const wallet = trip?.wallets?.find(w => w.id === activity.walletId);
     const walletRate = wallet?.baselineExchangeRate || 1;
 
-    const members = trip?.members || [];
-    const createdByMember = activity.createdBy ? members.find(m => m.id === activity.createdBy) : null;
-    const modifiedByMember = activity.lastModifiedBy ? members.find(m => m.id === activity.lastModifiedBy) : null;
+    const createdByMember = findAttributedMember(trip, activity.createdBy);
+    const modifiedByMember = findAttributedMember(trip, activity.lastModifiedBy);
     const showModifiedBy = modifiedByMember && modifiedByMember.id !== createdByMember?.id;
 
     const totalSpentHome = (activity.expenses || []).reduce((sum, e) => sum + (e.convertedAmountHome || 0), 0);
@@ -59,6 +60,22 @@ export function ActivitySummaryModal({
     const isOverBudget = totalSpentHome > allocatedBudgetHome;
     const variance = Math.abs(allocatedBudgetHome - totalSpentHome);
     const hasExpenses = activity.expenses && activity.expenses.length > 0;
+    const isSpontaneousCompleted = !!activity.isSpontaneous && activity.isCompleted;
+    const primaryActionLabel = isSpontaneousCompleted
+        ? 'EDIT'
+        : activity.isCompleted
+            ? 'REOPEN'
+            : 'COMPLETE';
+    const handlePrimaryAction = () => {
+        if (isSpontaneousCompleted) {
+            onEdit();
+            onClose();
+            return;
+        }
+
+        onToggleComplete();
+        onClose();
+    };
 
     return (
         <AnimatedModal visible={isVisible} onClose={onClose}>
@@ -98,16 +115,18 @@ export function ActivitySummaryModal({
                                             className="text-[14px] font-black uppercase tracking-widest"
                                             style={{ color: isOverBudget ? '#FF3B30' : (isDark ? '#F2F0E8' : '#5D6D54') }}
                                         >
-                                            {isOverBudget ? `YOU EXCEEDED BY ${Calculations.formatCurrency(variance, homeCurrency)} FOR THIS TRIP.` : `YOU'VE SAVED ${Calculations.formatCurrency(variance, homeCurrency)} FOR THIS TRIP.`}
+                                            {isOverBudget ? 'YOU EXCEEDED BY ' : "YOU'VE SAVED "}
+                                            <AnimatedValueText
+                                                text={Calculations.formatCurrency(variance, homeCurrency)}
+                                                style={{ color: isOverBudget ? '#FF3B30' : (isDark ? '#F2F0E8' : '#5D6D54') }}
+                                            />
+                                            {isOverBudget ? ' FOR THIS TRIP.' : ' FOR THIS TRIP.'}
                                         </Text>
                                     </View>
 
                                     <View className="flex-row gap-3 pt-2">
                                         <TouchableOpacity
-                                            onPress={() => {
-                                                onToggleComplete();
-                                                onClose();
-                                            }}
+                                            onPress={handlePrimaryAction}
                                             disabled={!hasExpenses}
                                             className="flex-1 py-4 rounded-xl items-center"
                                             style={[
@@ -116,7 +135,7 @@ export function ActivitySummaryModal({
                                             ]}
                                         >
                                             <Text className="text-[13px] font-black text-white tracking-widest uppercase">
-                                                {activity.isCompleted ? 'REOPEN' : 'COMPLETE'}
+                                                {primaryActionLabel}
                                             </Text>
                                         </TouchableOpacity>
 
@@ -128,7 +147,7 @@ export function ActivitySummaryModal({
                                         </TouchableOpacity>
                                     </View>
 
-                                    {activity.isCompleted && (
+                                    {activity.isCompleted && !activity.isSpontaneous && (
                                         <Text style={{
                                             fontSize: 10,
                                             fontWeight: '700',
@@ -183,8 +202,3 @@ export function ActivitySummaryModal({
         </AnimatedModal>
     );
 }
-
-const modalStyles = {
-    label: { fontSize: 9, fontWeight: '900' as const, color: '#9ca3af', marginBottom: 8, letterSpacing: 0.5 },
-    divider: { height: 1, backgroundColor: 'rgba(255, 255, 255, 0.4)', marginVertical: 16 }
-};

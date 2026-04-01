@@ -1,17 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, TextInput, FlatList, Share, StyleSheet, ActivityIndicator, Alert } from 'react-native';
-import { Feather } from '@expo/vector-icons';
-import { useStore } from '@/src/store/useStore';
+import { AnimatedModal } from './AnimatedModal';
 import { GlassView } from './GlassView';
-import { AnimatedModal, StepTransition } from './AnimatedModal';
-import { PressableScale } from './PressableScale';
-import { RippleButton } from './RippleButton';
-import { TripMember } from '@/src/types/models';
 import { usePermissions } from '@/src/hooks/usePermissions';
 import { useAuth } from '@/src/hooks/useAuth';
-import QRCode from 'react-native-qrcode-svg';
-import { base64Encode } from '@/src/utils/base64';
-import { runSync } from '@/src/sync/syncEngine';
+import { useStore } from '@/src/store/useStore';
+import { refreshTripCloudState } from '@/src/store/cloudSyncHelpers';
+import { getDisplayTripMembers } from '@/src/utils/memberAttribution';
+import { Feather } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import { Share, Text, TouchableOpacity, View } from 'react-native';
+import { ManageMembersInviteSection, MembersListSection, RemoveMemberPrompt } from '@/src/features/trip/components/member/ManageMembersSections';
+import { buildTripShareCode, buildTripShareQrPayload } from '@/src/features/trip/components/member/memberSharePayload';
 
 interface ManageMembersModalProps {
     tripId: string;
@@ -23,18 +21,16 @@ interface ManageMembersModalProps {
 export const ManageBuddiesModal = ManageMembersModal;
 
 export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersModalProps) {
-    const { theme, trips, removeMember, updateMemberRole, activities, expenses, sendEmailInvite } = useStore();
+    const { theme, trips, removeMember, updateMemberRole, activities, sendEmailInvite } = useStore();
     const { userId, email: userEmail, displayName, isAuthenticated } = useAuth();
     const isDark = theme === 'dark';
-    const trip = trips.find(t => t.id === tripId);
-    const members = (trip?.members || []).filter(m => !(m as any).removed);
+    const trip = trips.find(item => item.id === tripId);
+    const members = getDisplayTripMembers(trip).filter(member => !(member as any).removed);
     const { canManageMembers } = usePermissions(tripId);
 
     const [isAdding, setIsAdding] = useState<false | 'qr' | 'code' | 'google'>(false);
     const [removingId, setRemovingId] = useState<string | null>(null);
     const [isSyncing, setIsSyncing] = useState(false);
-
-    // Email invite state
     const [inviteEmail, setInviteEmail] = useState('');
     const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
     const [isSending, setIsSending] = useState(false);
@@ -42,68 +38,32 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
     const [inviteError, setInviteError] = useState('');
 
     useEffect(() => {
-        if (visible) {
-            setIsAdding(false);
-            setInviteEmail('');
-            setInviteRole('editor');
-            setIsSending(false);
-            setInviteSent(false);
-            setInviteError('');
-            setRemovingId(null);
-            setIsSyncing(true);
-            runSync().finally(() => setIsSyncing(false));
-        }
-    }, [visible]);
-
-    const getEncodedData = () => {
-        if (!trip) return '';
-        const tripActivities = activities.filter(a => a.tripId === trip.id);
-        const shareData = {
-            ...trip,
-            role: 'admin',
-            activities: tripActivities,
-            sharedAt: Date.now(),
-            source: 'OrbitalGalileo',
-            isCloudSynced: true,
-        };
-        return base64Encode(JSON.stringify(shareData));
-    };
-
-    const getQRPayload = () => {
-        if (!trip) return '';
-        const slimWallets = (trip.wallets || []).map((w: any) => ({
-            id: w.id, tripId: w.tripId, currency: w.currency,
-            totalBudget: w.totalBudget, spentAmount: w.spentAmount || 0,
-            defaultRate: w.defaultRate, baselineExchangeRate: w.baselineExchangeRate,
-            createdAt: w.createdAt, version: w.version || 1,
-        }));
-        const slim = {
-            id: trip.id, title: trip.title, homeCurrency: trip.homeCurrency,
-            countries: trip.countries, startDate: trip.startDate, endDate: trip.endDate,
-            totalBudget: trip.totalBudget, totalBudgetHomeCached: trip.totalBudgetHomeCached,
-            lastModified: trip.lastModified || Date.now(),
-            members: (trip.members || []).map((m: any) => ({
-                id: m.id, name: m.name, color: m.color, isCreator: m.isCreator, role: m.role, userId: m.userId,
-            })),
-            wallets: slimWallets,
-            role: 'admin', source: 'OrbitalGalileo', isCloudSynced: true, sharedAt: Date.now(),
-        };
-        return base64Encode(JSON.stringify(slim));
-    };
+        if (!visible) return;
+        setIsAdding(false);
+        setInviteEmail('');
+        setInviteRole('editor');
+        setIsSending(false);
+        setInviteSent(false);
+        setInviteError('');
+        setRemovingId(null);
+        setIsSyncing(true);
+        refreshTripCloudState(tripId).finally(() => setIsSyncing(false));
+    }, [tripId, visible]);
 
     const handleShareCode = async () => {
         try {
-            const encodedData = getEncodedData();
-            const msg = `Hey! Join my trip "${trip?.title}" on Aliqual.\n\nCopy this code and select the "+" icon:\n\n${encodedData}`;
-            await Share.share({ message: msg, title: `Join ${trip?.title}` });
-        } catch { }
+            const encodedData = buildTripShareCode(trip, activities);
+            const message = `Hey! Join my trip "${trip?.title}" on Aliqual.\n\nCopy this code and select the "+" icon:\n\n${encodedData}`;
+            await Share.share({ message, title: `Join ${trip?.title}` });
+        } catch {
+            // no-op
+        }
     };
 
     const handleRemove = () => {
-        if (removingId) {
-            removeMember(tripId, removingId);
-            setRemovingId(null);
-        }
+        if (!removingId) return;
+        removeMember(tripId, removingId);
+        setRemovingId(null);
     };
 
     const handleEmailInvite = async () => {
@@ -112,6 +72,7 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
             setInviteError('Enter a valid email address.');
             return;
         }
+
         setIsSending(true);
         setInviteError('');
         try {
@@ -126,8 +87,8 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
             });
             setInviteSent(true);
             setInviteEmail('');
-        } catch (e: any) {
-            setInviteError(e?.message || 'Failed to send invite. Try again.');
+        } catch (error: any) {
+            setInviteError(error?.message || 'Failed to send invite. Try again.');
         } finally {
             setIsSending(false);
         }
@@ -151,317 +112,66 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
         setInviteRole('editor');
     };
 
-    const removingMember = members.find(m => m.id === removingId);
+    const removingMember = members.find(member => member.id === removingId);
 
     return (
         <AnimatedModal visible={visible} onClose={handleClose}>
-                        <GlassView
-                            intensity={isDark ? 30 : 90}
-                            borderRadius={32}
-                            backgroundColor={isDark ? "rgba(40, 44, 38, 0.97)" : "rgba(255, 255, 255, 0.97)"}
-                            style={{ width: 320, padding: 28, alignSelf: 'center' }}
-                        >
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                    <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#F2F0E8' : '#111827', letterSpacing: 1 }}>
-                                        MEMBERS
-                                    </Text>
-                                    {isSyncing && (
-                                        <Feather name="refresh-cw" size={12} color={isDark ? '#9EB294' : '#6B7280'} />
-                                    )}
-                                </View>
-                                <TouchableOpacity onPress={handleClose} style={{ padding: 4 }}>
-                                    <Feather name="x" size={20} color={isDark ? '#9EB294' : '#6B7280'} />
-                                </TouchableOpacity>
-                            </View>
+            <GlassView
+                intensity={isDark ? 30 : 90}
+                borderRadius={32}
+                backgroundColor={isDark ? 'rgba(40, 44, 38, 0.97)' : 'rgba(255, 255, 255, 0.97)'}
+                style={{ width: 320, padding: 28, alignSelf: 'center' }}
+            >
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#F2F0E8' : '#111827', letterSpacing: 1 }}>
+                            MEMBERS
+                        </Text>
+                        {isSyncing && <Feather name="refresh-cw" size={12} color={isDark ? '#9EB294' : '#6B7280'} />}
+                    </View>
+                    <TouchableOpacity onPress={handleClose} style={{ padding: 4 }}>
+                        <Feather name="x" size={20} color={isDark ? '#9EB294' : '#6B7280'} />
+                    </TouchableOpacity>
+                </View>
 
-                            {removingId ? (
-                                <View style={{ alignItems: 'center', paddingVertical: 16 }}>
-                                    <View style={{
-                                        width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center',
-                                        backgroundColor: 'rgba(239, 68, 68, 0.1)', marginBottom: 12,
-                                    }}>
-                                        <Feather name="user-minus" size={24} color="#ef4444" />
-                                    </View>
-                                    <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#F2F0E8' : '#111827', marginBottom: 4 }}>
-                                        Remove {removingMember?.name}?
-                                    </Text>
-                                    <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 16 }}>
-                                        Their activity attributions will remain.
-                                    </Text>
-                                    <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
-                                        <TouchableOpacity
-                                            onPress={() => setRemovingId(null)}
-                                            style={{ flex: 1, paddingVertical: 12, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(0,0,0,0.1)' }}
-                                        >
-                                            <Text style={{ fontSize: 11, fontWeight: '800', color: isDark ? '#F2F0E8' : '#111827', letterSpacing: 0.5 }}>CANCEL</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            onPress={handleRemove}
-                                            style={{ flex: 1, paddingVertical: 12, borderRadius: 14, alignItems: 'center', backgroundColor: '#ef4444' }}
-                                        >
-                                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff', letterSpacing: 0.5 }}>REMOVE</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-                            ) : (
-                                <>
-                                    {members.length === 0 ? (
-                                        <Text style={{ fontSize: 13, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', paddingVertical: 16 }}>
-                                            No members yet
-                                        </Text>
-                                    ) : (
-                                        <FlatList
-                                            data={members}
-                                            keyExtractor={item => item.id}
-                                            style={{ maxHeight: 220 }}
-                                            renderItem={({ item }) => (
-                                                <View style={{
-                                                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                                                    paddingVertical: 10, paddingHorizontal: 12,
-                                                    borderRadius: 14, marginBottom: 6,
-                                                    backgroundColor: isDark ? 'rgba(158, 178, 148, 0.06)' : 'rgba(93, 109, 84, 0.04)',
-                                                }}>
-                                                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                                                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: item.color, marginRight: 10 }} />
-                                                        <View style={{ flex: 1 }}>
-                                                            <Text style={{ fontSize: 13, fontWeight: '800', color: isDark ? '#F2F0E8' : '#111827' }}>
-                                                                {item.name}
-                                                            </Text>
-                                                            {item.isCreator && (
-                                                                <Text style={{ fontSize: 8, fontWeight: '700', color: isDark ? '#9EB294' : '#6B7280', letterSpacing: 0.5, marginTop: 1 }}>
-                                                                    OWNER
-                                                                </Text>
-                                                            )}
-                                                        </View>
-                                                    </View>
-                                                    {!item.isCreator && (
-                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                                            <TouchableOpacity
-                                                                onPress={() => canManageMembers && updateMemberRole(tripId, item.id, item.role === 'viewer' ? 'editor' : 'viewer')}
-                                                                activeOpacity={canManageMembers ? 0.7 : 1}
-                                                                style={{
-                                                                    paddingVertical: 3, paddingHorizontal: 8, borderRadius: 8,
-                                                                    backgroundColor: item.role === 'viewer'
-                                                                        ? 'rgba(239, 68, 68, 0.12)'
-                                                                        : (isDark ? 'rgba(178, 196, 170, 0.15)' : 'rgba(93, 109, 84, 0.12)'),
-                                                                }}
-                                                            >
-                                                                <Text style={{
-                                                                    fontSize: 8, fontWeight: '900', letterSpacing: 0.5,
-                                                                    color: item.role === 'viewer' ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54'),
-                                                                }}>
-                                                                    {item.role === 'viewer' ? 'VIEW ONLY' : 'EDITOR'}
-                                                                </Text>
-                                                            </TouchableOpacity>
-                                                            {canManageMembers && (
-                                                                <TouchableOpacity onPress={() => setRemovingId(item.id)} style={{ padding: 6 }}>
-                                                                    <Feather name="user-minus" size={14} color="#ef4444" />
-                                                                </TouchableOpacity>
-                                                            )}
-                                                        </View>
-                                                    )}
-                                                </View>
-                                            )}
-                                        />
-                                    )}
+                {removingId ? (
+                    <RemoveMemberPrompt
+                        isDark={isDark}
+                        memberName={removingMember?.name}
+                        onCancel={() => setRemovingId(null)}
+                        onConfirm={handleRemove}
+                    />
+                ) : (
+                    <>
+                        <MembersListSection
+                            canManageMembers={canManageMembers}
+                            isDark={isDark}
+                            members={members}
+                            onRemove={setRemovingId}
+                            onToggleRole={(memberId, role) => canManageMembers && updateMemberRole(tripId, memberId, role)}
+                        />
 
-                                    {/* Invite section */}
-                                    {isAdding === 'qr' ? (
-                                        <View style={{ alignItems: 'center', marginTop: 8 }}>
-                                            <Text style={{ fontSize: 10, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 12 }}>
-                                                Ask them to scan this QR from the "+" menu
-                                            </Text>
-                                            <View style={{ padding: 12, backgroundColor: '#FFF', borderRadius: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 3 }}>
-                                                <QRCode value={getQRPayload() || 'empty'} size={140} color="#111827" backgroundColor="transparent" />
-                                            </View>
-                                            <TouchableOpacity
-                                                onPress={handleBackFromAdding}
-                                                style={{ marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(0,0,0,0.1)' }}
-                                            >
-                                                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#9EB294' : '#6B7280', letterSpacing: 0.5 }}>DONE</Text>
-                                            </TouchableOpacity>
-                                        </View>
-
-                                    ) : isAdding === 'code' ? (
-                                        <View style={{ alignItems: 'center', marginTop: 8 }}>
-                                            <TouchableOpacity
-                                                onPress={handleShareCode}
-                                                style={{ paddingVertical: 12, paddingHorizontal: 20, borderRadius: 14, backgroundColor: isDark ? '#B2C4AA' : '#5D6D54', flexDirection: 'row', alignItems: 'center' }}
-                                            >
-                                                <Feather name="share" size={14} color={isDark ? '#1A1C18' : '#fff'} style={{ marginRight: 6 }} />
-                                                <Text style={{ fontSize: 11, fontWeight: '800', color: isDark ? '#1A1C18' : '#fff', letterSpacing: 0.5 }}>SHARE INVITE CODE</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                                onPress={handleBackFromAdding}
-                                                style={{ marginTop: 10, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(0,0,0,0.1)' }}
-                                            >
-                                                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#9EB294' : '#6B7280', letterSpacing: 0.5 }}>BACK</Text>
-                                            </TouchableOpacity>
-                                        </View>
-
-                                    ) : isAdding === 'google' ? (
-                                        /* ── Email / Google invite ── */
-                                        <View style={{ marginTop: 8 }}>
-                                            {!isAuthenticated ? (
-                                                <View style={{ alignItems: 'center', paddingVertical: 12 }}>
-                                                    <Feather name="lock" size={28} color={isDark ? '#9EB294' : '#6B7280'} />
-                                                    <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#F2F0E8' : '#111827', marginTop: 10, textAlign: 'center' }}>
-                                                        Sign in required
-                                                    </Text>
-                                                    <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginTop: 4 }}>
-                                                        Sign in to send email invites. Use QR or invite code instead.
-                                                    </Text>
-                                                </View>
-                                            ) : inviteSent ? (
-                                                <View style={{ alignItems: 'center', paddingVertical: 12 }}>
-                                                    <View style={{
-                                                        width: 44, height: 44, borderRadius: 22,
-                                                        backgroundColor: isDark ? 'rgba(158, 178, 148, 0.15)' : 'rgba(93, 109, 84, 0.1)',
-                                                        alignItems: 'center', justifyContent: 'center', marginBottom: 10,
-                                                    }}>
-                                                        <Feather name="check" size={22} color={isDark ? '#B2C4AA' : '#5D6D54'} />
-                                                    </View>
-                                                    <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#F2F0E8' : '#111827' }}>Invite sent!</Text>
-                                                    <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginTop: 4 }}>
-                                                        They'll see it when they open the app.
-                                                    </Text>
-                                                    <TouchableOpacity
-                                                        onPress={() => { setInviteSent(false); setInviteEmail(''); }}
-                                                        style={{
-                                                            marginTop: 14, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12,
-                                                            backgroundColor: isDark ? 'rgba(158, 178, 148, 0.12)' : 'rgba(93, 109, 84, 0.08)',
-                                                        }}
-                                                    >
-                                                        <Text style={{ fontSize: 11, fontWeight: '800', color: isDark ? '#B2C4AA' : '#5D6D54', letterSpacing: 0.5 }}>INVITE ANOTHER</Text>
-                                                    </TouchableOpacity>
-                                                </View>
-                                            ) : (
-                                                <>
-                                                    <Text style={{ fontSize: 10, color: isDark ? '#9EB294' : '#6B7280', marginBottom: 8 }}>
-                                                        Enter their Google account email.
-                                                    </Text>
-                                                    <TextInput
-                                                        value={inviteEmail}
-                                                        onChangeText={t => { setInviteEmail(t); setInviteError(''); }}
-                                                        placeholder="email@gmail.com"
-                                                        placeholderTextColor={isDark ? '#6B7280' : '#9CA3AF'}
-                                                        autoFocus
-                                                        keyboardType="email-address"
-                                                        autoCapitalize="none"
-                                                        editable={!isSending}
-                                                        style={{
-                                                            fontSize: 14, fontWeight: '700',
-                                                            paddingVertical: 12, paddingHorizontal: 14,
-                                                            borderRadius: 14, marginBottom: 4,
-                                                            color: isDark ? '#F2F0E8' : '#111827',
-                                                            backgroundColor: isDark ? 'rgba(158, 178, 148, 0.08)' : 'rgba(93, 109, 84, 0.06)',
-                                                            borderWidth: 1,
-                                                            borderColor: inviteError ? '#ef4444' : (isDark ? 'rgba(158,178,148,0.12)' : 'rgba(93,109,84,0.1)'),
-                                                            opacity: isSending ? 0.5 : 1,
-                                                        }}
-                                                    />
-                                                    {inviteError ? (
-                                                        <Text style={{ fontSize: 10, color: '#ef4444', marginBottom: 8 }}>{inviteError}</Text>
-                                                    ) : <View style={{ height: 8 }} />}
-
-                                                    {/* Role selector */}
-                                                    <Text style={{ fontSize: 9, fontWeight: '700', color: isDark ? '#9EB294' : '#6B7280', letterSpacing: 0.5, marginBottom: 6 }}>PERMISSION</Text>
-                                                    <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
-                                                        {(['editor', 'viewer'] as const).map(role => (
-                                                            <TouchableOpacity
-                                                                key={role}
-                                                                onPress={() => setInviteRole(role)}
-                                                                disabled={isSending}
-                                                                style={{
-                                                                    flex: 1, paddingVertical: 9, borderRadius: 12, alignItems: 'center',
-                                                                    backgroundColor: inviteRole === role
-                                                                        ? (isDark ? '#B2C4AA' : '#5D6D54')
-                                                                        : (isDark ? 'rgba(158, 178, 148, 0.08)' : 'rgba(93, 109, 84, 0.06)'),
-                                                                    borderWidth: 1,
-                                                                    borderColor: inviteRole === role ? 'transparent' : (isDark ? 'rgba(158,178,148,0.15)' : 'rgba(93,109,84,0.1)'),
-                                                                }}
-                                                            >
-                                                                <Text style={{
-                                                                    fontSize: 9, fontWeight: '900', letterSpacing: 0.5,
-                                                                    color: inviteRole === role ? (isDark ? '#1A1C18' : '#fff') : (isDark ? '#9EB294' : '#6B7280'),
-                                                                }}>
-                                                                    {role === 'editor' ? 'EDITOR' : 'VIEW ONLY'}
-                                                                </Text>
-                                                            </TouchableOpacity>
-                                                        ))}
-                                                    </View>
-
-                                                    <RippleButton
-                                                        onPress={handleEmailInvite}
-                                                        disabled={isSending}
-                                                        glowColor={isDark ? 'rgba(178, 196, 170, 0.5)' : 'rgba(93, 109, 84, 0.4)'}
-                                                        style={{
-                                                            flexDirection: 'row', paddingVertical: 12, borderRadius: 14,
-                                                            alignItems: 'center', justifyContent: 'center',
-                                                            backgroundColor: isDark ? '#B2C4AA' : '#5D6D54',
-                                                            opacity: isSending ? 0.7 : 1, marginBottom: 8,
-                                                        }}
-                                                    >
-                                                        {isSending
-                                                            ? <ActivityIndicator size="small" color={isDark ? '#1A1C18' : '#fff'} />
-                                                            : <Text style={{ fontSize: 11, fontWeight: '900', letterSpacing: 1, color: isDark ? '#1A1C18' : '#fff' }}>SEND INVITE</Text>
-                                                        }
-                                                    </RippleButton>
-                                                </>
-                                            )}
-                                            <TouchableOpacity
-                                                onPress={handleBackFromAdding}
-                                                style={{ alignItems: 'center', paddingVertical: 8 }}
-                                            >
-                                                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#9EB294' : '#6B7280', letterSpacing: 0.5 }}>BACK</Text>
-                                            </TouchableOpacity>
-                                        </View>
-
-                                    ) : (
-                                        /* ── Default: three invite buttons ── */
-                                        <View style={{ marginTop: 8, gap: 6 }}>
-                                            <TouchableOpacity
-                                                onPress={() => setIsAdding('qr')}
-                                                style={{
-                                                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                                                    paddingVertical: 12, borderRadius: 14,
-                                                    backgroundColor: isDark ? '#B2C4AA' : '#5D6D54',
-                                                }}
-                                            >
-                                                <Feather name="maximize" size={14} color={isDark ? '#1A1C18' : '#fff'} style={{ marginRight: 6 }} />
-                                                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#1A1C18' : '#fff', letterSpacing: 1 }}>INVITE VIA QR</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                                onPress={() => setIsAdding('code')}
-                                                style={{
-                                                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                                                    paddingVertical: 12, borderRadius: 14,
-                                                    borderWidth: 1, borderStyle: 'dashed',
-                                                    borderColor: isDark ? 'rgba(158,178,148,0.25)' : 'rgba(93,109,84,0.2)',
-                                                }}
-                                            >
-                                                <Feather name="hash" size={14} color={isDark ? '#9EB294' : '#5D6D54'} style={{ marginRight: 6 }} />
-                                                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#9EB294' : '#5D6D54', letterSpacing: 1 }}>SHARE INVITE CODE</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                                onPress={() => setIsAdding('google')}
-                                                style={{
-                                                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                                                    paddingVertical: 12, borderRadius: 14,
-                                                    borderWidth: 1,
-                                                    borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(93,109,84,0.15)',
-                                                    backgroundColor: isDark ? 'rgba(158,178,148,0.05)' : 'rgba(93,109,84,0.04)',
-                                                }}
-                                            >
-                                                <Feather name="mail" size={14} color={isDark ? '#9EB294' : '#5D6D54'} style={{ marginRight: 6 }} />
-                                                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#9EB294' : '#5D6D54', letterSpacing: 1 }}>ADD VIA GOOGLE</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                    )}
-                                </>
-                            )}
-                    </GlassView>
+                        <ManageMembersInviteSection
+                            inviteEmail={inviteEmail}
+                            inviteError={inviteError}
+                            inviteRole={inviteRole}
+                            inviteSent={inviteSent}
+                            isAdding={isAdding}
+                            isAuthenticated={isAuthenticated}
+                            isDark={isDark}
+                            isSending={isSending}
+                            qrPayload={buildTripShareQrPayload(trip)}
+                            onBack={handleBackFromAdding}
+                            onChangeEmail={value => { setInviteEmail(value); setInviteError(''); }}
+                            onInviteAnother={() => { setInviteSent(false); setInviteEmail(''); }}
+                            onSelectMode={setIsAdding}
+                            onSelectRole={setInviteRole}
+                            onSendInvite={handleEmailInvite}
+                            onShareCode={handleShareCode}
+                        />
+                    </>
+                )}
+            </GlassView>
         </AnimatedModal>
     );
 }

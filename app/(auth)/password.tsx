@@ -15,8 +15,8 @@ import { MeshBackground } from '@/components/MeshBackground';
 import { GlassView } from '@/components/GlassView';
 import { AuthLoadingOverlay } from '@/components/AuthLoadingOverlay';
 import { useTheme } from '@/src/hooks/useTheme';
-import { signInWithEmail, linkLocalDataToUser } from '@/src/auth/googleAuth';
-import { startSyncLoop, runSync } from '@/src/sync/syncEngine';
+import { signInWithEmail } from '@/src/auth/googleAuth';
+import { bootstrapAuthState } from '@/src/auth/authRuntime';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function PasswordScreen() {
@@ -48,9 +48,7 @@ export default function PasswordScreen() {
         try {
             const authState = await signInWithEmail(email!, password);
             if (authState.isAuthenticated && authState.userId) {
-                linkLocalDataToUser(authState.userId);
-                startSyncLoop();
-                runSync().catch(console.error);
+                bootstrapAuthState(authState, { triggerSync: true });
                 setLoading(false);
                 setTransitioning(true);
                 setTimeout(() => router.replace('/(tabs)'), 1200);
@@ -157,7 +155,7 @@ export default function PasswordScreen() {
                             onPress={() => router.push({ pathname: '/(auth)/register', params: { email: email! } })}
                         >
                             <Text style={[styles.registerLinkText, { color: colors.subtext }]}>
-                                Don't have an account? <Text style={{ color: colors.accent, fontWeight: '600' }}>Register</Text>
+                                {"Don't have an account? "}<Text style={{ color: colors.accent, fontWeight: '600' }}>Register</Text>
                             </Text>
                         </TouchableOpacity>
                     </GlassView>

@@ -1,6 +1,9 @@
 import { StateCreator } from 'zustand';
 import { inviteService } from '../../services/inviteService';
 import { TripInvite } from '../../types/models';
+import { ensureDistinctMemberColors } from '../../utils/memberAttribution';
+import { buildTripDisplayFields } from '../../utils/tripDisplayFields';
+import { fetchTripCloudBundle } from '../cloudSyncHelpers';
 import type { AppState } from '../useStore';
 
 export interface InviteSlice {
@@ -36,92 +39,14 @@ export const createInviteSlice: StateCreator<AppState, [], [], InviteSlice> = (s
     inviteLoading: false,
 
     sendEmailInvite: async (params) => {
-        // Force-sync the trip (and its activities/expenses) directly to Supabase
-        // before creating the invite, so the RPC can find it when the invitee accepts.
-        const trip = get().trips.find(t => t.id === params.tripId);
-        if (trip) {
-            const { supabase } = await import('../storeHelpers');
-
-            // Ensure the creator always has a member record with isCreator: true.
-            // Without this, after an invite is accepted and the trip syncs from the server,
-            // usePermissions can't identify the creator (members only contains invited users).
-            const { BUDDY_COLORS } = await import('../../types/models');
-            const { generateId } = await import('../../utils/mathUtils');
-            let membersToSync = [...(trip.members || [])];
-            const hasCreatorEntry = membersToSync.some(m => m.isCreator === true);
-            if (!hasCreatorEntry) {
-                membersToSync = [{
-                    id: generateId(),
-                    name: params.fromDisplayName || 'Creator',
-                    color: BUDDY_COLORS[0],
-                    isCreator: true as const,
-                    userId: params.fromUserId,
-                    email: params.fromEmail || undefined,
-                    role: 'editor' as const,
-                    addedAt: Date.now(),
-                }, ...membersToSync];
-            }
-
-            // Push trip directly
-            const { error: tripErr } = await supabase.from('trips').upsert({
-                id: trip.id,
-                title: trip.title,
-                destination: trip.destination,
-                start_date: trip.startDate,
-                end_date: trip.endDate,
-                home_country: trip.homeCountry,
-                home_currency: trip.homeCurrency,
-                wallets: trip.wallets,
-                total_budget_home_cached: trip.totalBudgetHomeCached,
-                countries: trip.countries,
-                members: membersToSync,
-                is_completed: trip.isCompleted,
-                last_modified: trip.lastModified,
-                user_id: params.fromUserId,
-            });
-            if (tripErr) {
-                throw new Error(`Failed to sync trip to cloud: ${tripErr.message}`);
-            }
-
-            // Push activities
-            const tripActivities = get().activities.filter(a => a.tripId === trip.id);
-            if (tripActivities.length > 0) {
-                const { error: actErr } = await supabase.from('activities').upsert(
-                    tripActivities.map(a => ({
-                        id: a.id, trip_id: a.tripId, wallet_id: a.walletId,
-                        title: a.title, category: a.category, date: a.date, time: a.time,
-                        end_time: a.endTime, allocated_budget: a.allocatedBudget,
-                        budget_currency: a.budgetCurrency, is_completed: a.isCompleted,
-                        last_modified: a.lastModified, description: a.description,
-                        location: a.location, countries: a.countries,
-                        created_by: a.createdBy, last_modified_by: a.lastModifiedBy,
-                        user_id: params.fromUserId,
-                    }))
-                );
-                if (actErr) console.warn('[InviteSlice] Failed to sync activities:', actErr.message);
-            }
-
-            // Push expenses
-            const tripExpenses = get().expenses.filter(e => e.tripId === trip.id);
-            if (tripExpenses.length > 0) {
-                const { error: expErr } = await supabase.from('expenses').upsert(
-                    tripExpenses.map(e => ({
-                        id: e.id, trip_id: e.tripId, wallet_id: e.walletId,
-                        activity_id: e.activityId, name: e.name, amount: e.amount,
-                        currency: e.currency, converted_amount_home: e.convertedAmountHome,
-                        converted_amount_trip: e.convertedAmountTrip, category: e.category,
-                        time: e.time, date: e.date, original_amount: e.originalAmount,
-                        original_currency: e.originalCurrency,
-                        created_by: e.createdBy, last_modified_by: e.lastModifiedBy,
-                        user_id: params.fromUserId,
-                    }))
-                );
-                if (expErr) console.warn('[InviteSlice] Failed to sync expenses:', expErr.message);
-            }
+        const bundle = await fetchTripCloudBundle(params.tripId);
+        if (!bundle) {
+            throw new Error('Trip is not available in the cloud yet. Please try again in a moment.');
         }
 
         const invite = await inviteService.sendInvite({
             ...params,
+            tripTitle: bundle.trip.title || params.tripTitle,
             role: params.role || 'editor',
         });
         return invite;
@@ -147,9 +72,10 @@ export const createInviteSlice: StateCreator<AppState, [], [], InviteSlice> = (s
         const auth = await getAuthState();
 
         const memberName = auth.displayName || invite.toEmail.split('@')[0];
-        const existingMembers = get().trips.find(t => t.id === invite.tripId)?.members || [];
+        const existingMembers = ensureDistinctMemberColors(get().trips.find(t => t.id === invite.tripId)?.members || []);
         const usedColors = existingMembers.map((m: any) => m.color);
         const memberColor = BUDDY_COLORS.find((c: string) => !usedColors.includes(c)) ||
+            BUDDY_COLORS[1] ||
             BUDDY_COLORS[existingMembers.length % BUDDY_COLORS.length];
 
         let importSuccess = false;
@@ -249,18 +175,12 @@ async function importTripFromCloud(
         homeCountry: tripRow.home_country,
         homeCurrency: tripRow.home_currency,
         wallets: tripRow.wallets || [],
-        totalBudgetHomeCached: Number(tripRow.total_budget_home_cached || 0),
-        tripCurrency: tripRow.wallets?.[0]?.currency || tripRow.home_currency,
-        totalBudgetTrip: tripRow.wallets?.[0]?.totalBudget || 0,
-        totalBudget: (tripRow.wallets || []).reduce(
-            (acc: number, w: any) => acc + (w.totalBudget / (w.defaultRate || 1)), 0
-        ),
-        currency: tripRow.wallets?.[0]?.currency || tripRow.home_currency,
+        ...buildTripDisplayFields(tripRow.wallets || [], tripRow.home_currency),
         countries: tripRow.countries || [],
-        members: tripRow.members || [],
+        members: ensureDistinctMemberColors(tripRow.members || []),
         isCompleted: tripRow.is_completed || false,
         lastModified: Number(tripRow.last_modified || Date.now()),
-        role: 'admin' as const,
+        role: invite.role === 'viewer' ? 'viewer' as const : 'admin' as const,
         isCloudSynced: true,
         version: Number(tripRow.version || 1),
         updatedBy: tripRow.updated_by || undefined,
@@ -329,13 +249,17 @@ async function importTripFromCloud(
             deletedAt: null,
         }));
 
-        // Persist expenses to local DB only (no sync push)
+        const expensesByActivity = new Map<string, any[]>();
         newExpenses.forEach((e: any) => {
             upsertRecord('expenses', e.id, e, { walletId: e.walletId, tripId: e.tripId, activityId: e.activityId });
+            if (!e.activityId) return;
+            const current = expensesByActivity.get(e.activityId) || [];
+            current.push(e);
+            expensesByActivity.set(e.activityId, current);
         });
 
         newActivities.forEach(a => {
-            a.expenses = newExpenses.filter(e => e.activityId === a.id);
+            a.expenses = expensesByActivity.get(a.id) || [];
         });
     }
 

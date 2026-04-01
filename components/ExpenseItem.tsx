@@ -3,6 +3,7 @@ import { Feather } from '@expo/vector-icons';
 import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { useStore } from '../src/store/useStore';
+import { findAttributedMember, isCollaborativeTrip } from '../src/utils/memberAttribution';
 
 interface ExpenseItemProps {
     expense: Expense;
@@ -37,16 +38,8 @@ export const ExpenseItem = React.memo(({ expense, onPress }: ExpenseItemProps) =
     const trip = useMemo(() => trips.find(t => t.id === expense.tripId), [trips, expense.tripId]);
     
     const authorMember = useMemo(() => {
-        const members = trip?.members;
-        if (!members || members.length <= 1) return null;
-        const authorId = expense.lastModifiedBy || expense.createdBy;
-        if (!authorId) return null;
-        let member = members.find(m => m.id === authorId);
-        if (!member) member = members.find(m => m.userId === authorId);
-        if (!member) {
-            member = members.find(m => m.isCreator);
-        }
-        return member || null;
+        if (!isCollaborativeTrip(trip)) return null;
+        return findAttributedMember(trip, expense.lastModifiedBy || expense.createdBy);
     }, [trip, expense.lastModifiedBy, expense.createdBy]);
 
     const memberColor = authorMember?.color || null;
@@ -86,3 +79,5 @@ export const ExpenseItem = React.memo(({ expense, onPress }: ExpenseItemProps) =
         </TouchableOpacity>
     );
 });
+
+ExpenseItem.displayName = 'ExpenseItem';

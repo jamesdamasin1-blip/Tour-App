@@ -1,189 +1,287 @@
 import { StateCreator } from 'zustand';
-import { Expense, ExpenseCategory, Wallet, Activity } from '../../types/models';
+import { Activity, Expense, ExpenseCategory } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
-import { applyExpenseFIFO } from '../../finance/expense/expenseEngine';
-import { getDefaultLot } from '../../finance/wallet/walletEngine';
-import { offlineSync, stampFieldUpdates } from '../storeHelpers';
+import { getDefaultLot, getWalletBalance } from '../../finance/wallet/walletEngine';
 import type { AppState } from '../useStore';
+import {
+    beginTripCloudMutation,
+    endTripCloudMutation,
+    fetchTripCloudBundle,
+    refreshTripCloudState,
+    setWalletErrorState,
+} from '../cloudSyncHelpers';
+import { syncTrace, summarizeActivity, summarizeExpenses, summarizeTrip, summarizeWallet } from '../../sync/debug';
+import { stampFieldUpdates, supabase } from '../storeHelpers';
 
 export interface ExpenseSlice {
     expenses: Expense[];
-    addExpense: (tripId: string, walletId: string, activityId: string | undefined, expense: Omit<Expense, 'id' | 'tripId' | 'walletId' | 'activityId'> & { id?: string }, fromSync?: boolean) => void;
-    updateExpense: (id: string, expense: Partial<Omit<Expense, 'id' | 'tripId' | 'walletId' | 'activityId'>>, fromSync?: boolean) => void;
-    deleteExpense: (id: string, fromSync?: boolean) => void;
-    logSpontaneousExpense: (tripId: string, walletId: string, data: { title: string, amount: number, category: ExpenseCategory, originalAmount?: number, originalCurrency?: string, date: number }) => void;
+    addExpense: (
+        tripId: string,
+        walletId: string,
+        activityId: string | undefined,
+        expense: Omit<Expense, 'id' | 'tripId' | 'walletId' | 'activityId'> & { id?: string }
+    ) => Promise<void>;
+    updateExpense: (
+        id: string,
+        expense: Partial<Omit<Expense, 'id' | 'tripId' | 'walletId' | 'activityId'>>
+    ) => Promise<void>;
+    deleteExpense: (id: string) => Promise<void>;
+    logSpontaneousExpense: (
+        tripId: string,
+        walletId: string,
+        data: {
+            title: string;
+            amount: number;
+            category: ExpenseCategory;
+            originalAmount?: number;
+            originalCurrency?: string;
+            date: number;
+        }
+    ) => Promise<void>;
 }
 
-export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = (set) => ({
+const withConvertedAmounts = (
+    wallet: any,
+    expenseData: Partial<Expense> & { amount?: number; convertedAmountTrip?: number; convertedAmountHome?: number }
+) => {
+    const tripAmount = expenseData.convertedAmountTrip ?? expenseData.amount ?? 0;
+    const defaultLot = getDefaultLot(wallet as any);
+    const lockedRate = defaultLot?.lockedRate ?? wallet.baselineExchangeRate ?? 1;
+
+    return {
+        currency: expenseData.currency || wallet.currency,
+        convertedAmountTrip: tripAmount,
+        convertedAmountHome: expenseData.convertedAmountHome ?? Math.round(tripAmount * lockedRate * 100) / 100,
+    };
+};
+
+const assertSufficientWalletBalance = (
+    wallet: any,
+    requestedTripAmount: number,
+    reclaimableTripAmount = 0
+) => {
+    const availableTripAmount = Number(getWalletBalance(wallet as any) || 0) + reclaimableTripAmount;
+    if (requestedTripAmount > availableTripAmount + 0.01) {
+        const currency = wallet?.currency || 'wallet currency';
+        const availableFormatted = availableTripAmount.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
+        throw new Error(`Not enough balance in this wallet. Available: ${currency} ${availableFormatted}.`);
+    }
+};
+
+export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = (_set, _get) => ({
     expenses: [],
 
-    addExpense: (tripId, walletId, activityId, expenseData, fromSync) =>
-        set((state) => {
-            const expenseId = expenseData.id || generateId();
+    addExpense: async (tripId, walletId, activityId, expenseData) => {
+        beginTripCloudMutation(tripId);
+        try {
+            setWalletErrorState(null);
+            syncTrace('ExpenseMutation', 'submit_add', { tripId, walletId, activityId, expenseData });
+            const localTrip = _get().trips.find(trip => trip.id === tripId);
+            const localWallet = localTrip?.wallets.find(wallet => wallet.id === walletId);
+            const wallet = localWallet ?? (await fetchTripCloudBundle(tripId))?.wallets.find(w => w.id === walletId);
+            if (!wallet) {
+                syncTrace('ExpenseMutation', 'missing_wallet_for_add', { tripId, walletId, activityId });
+                return;
+            }
+            syncTrace('ExpenseMutation', 'resolved_wallet_for_add', {
+                trip: summarizeTrip(localTrip),
+                wallet: summarizeWallet(wallet),
+            });
+
             const lastModified = Date.now();
-            const trip = state.trips.find(t => t.id === tripId);
-            const wallet = trip?.wallets?.find(w => w.id === walletId);
-
-            if (!wallet) return state;
-
-            const expenseCurrency = (expenseData as any).currency || wallet.currency;
-            const expenseAmount: number = (expenseData as any).amount || 0;
-            const convertedAmountTrip: number = (expenseData as any).convertedAmountTrip ?? expenseAmount;
-
-            const defaultLot = getDefaultLot(wallet as any);
-            const lockedRate: number = defaultLot?.lockedRate ?? (wallet as any).baselineExchangeRate ?? 1;
-
-            const convertedAmountHome: number = (expenseData as any).convertedAmountHome ??
-                Math.round(convertedAmountTrip * lockedRate * 100) / 100;
+            const { currency, convertedAmountTrip, convertedAmountHome } = withConvertedAmounts(wallet, expenseData);
+            assertSufficientWalletBalance(wallet, convertedAmountTrip);
+            const expenseId = expenseData.id || generateId();
 
             const newExpense: Expense = {
-                ...(expenseData as any),
+                ...(expenseData as Expense),
                 id: expenseId,
                 tripId,
                 walletId,
                 activityId,
-                currency: expenseCurrency,
-                convertedAmountHome,
+                currency,
                 convertedAmountTrip,
-                lotBreakdown: [],
-                date: (expenseData as any).date || Date.now(),
-                time: (expenseData as any).time || Date.now(),
-                version: 1,
+                convertedAmountHome,
+                date: expenseData.date || Date.now(),
+                time: expenseData.time || Date.now(),
+                version: expenseData.version ?? 1,
                 deletedAt: null,
+                lastModified,
+                fieldUpdates: stampFieldUpdates({}, {
+                    ...(expenseData as Record<string, unknown>),
+                    currency,
+                    convertedAmountTrip,
+                    convertedAmountHome,
+                }, lastModified),
             };
-            newExpense.fieldUpdates = stampFieldUpdates({}, { ...newExpense });
+            const { error: expenseErr } = await supabase.rpc('add_expense_cloud', {
+                p_expense: newExpense,
+            });
+            if (expenseErr) throw expenseErr;
+            syncTrace('ExpenseMutation', 'rpc_add_success', summarizeExpenses([newExpense]));
 
-            let updatedActivities = state.activities;
-            if (activityId) {
-                updatedActivities = state.activities.map(a =>
-                    a.id === activityId ? { ...a, expenses: [...(a.expenses || []), newExpense], lastModified } : a
-                );
+            await refreshTripCloudState(tripId);
+            syncTrace('ExpenseMutation', 'refresh_after_add_done', { tripId, walletId, activityId });
+        } catch (error: any) {
+            setWalletErrorState(error?.message || 'Check your wallet balances!');
+            syncTrace('ExpenseMutation', 'add_failed', {
+                tripId,
+                walletId,
+                activityId,
+                message: error?.message,
+            });
+            console.error('[Expense] Add failed:', error);
+            throw error;
+        } finally {
+            endTripCloudMutation(tripId);
+        }
+    },
+
+    updateExpense: async (id, expenseData) => {
+        const localExpense = _get().expenses.find(expense => expense.id === id);
+        const tripId = localExpense?.tripId;
+        if (!tripId) return;
+
+        beginTripCloudMutation(tripId);
+        try {
+            setWalletErrorState(null);
+            syncTrace('ExpenseMutation', 'submit_update', { tripId, expenseId: id, patch: expenseData });
+
+            const localTrip = _get().trips.find(trip => trip.id === tripId);
+            const bundle = (!localExpense || !localTrip)
+                ? await fetchTripCloudBundle(tripId)
+                : null;
+            const expense = localExpense ?? bundle?.expenses.find(existing => existing.id === id);
+            if (!expense) {
+                syncTrace('ExpenseMutation', 'missing_expense_for_update', { tripId, expenseId: id });
+                return;
             }
 
-            if (!fromSync) offlineSync.expense(newExpense);
+            const wallet = localTrip?.wallets.find(existing => existing.id === expense.walletId)
+                ?? bundle?.wallets.find(existing => existing.id === expense.walletId);
+            if (!wallet) {
+                syncTrace('ExpenseMutation', 'missing_wallet_for_update', { tripId, expenseId: id, walletId: expense.walletId });
+                return;
+            }
+            syncTrace('ExpenseMutation', 'resolved_expense_for_update', {
+                trip: summarizeTrip(localTrip ?? bundle?.trip),
+                wallet: summarizeWallet(wallet),
+                expense: summarizeExpenses([expense]),
+            });
 
-            // Wallet is NOT affected here — wallet only changes when activity is marked COMPLETE.
-            return {
-                expenses: [...state.expenses, newExpense],
-                activities: updatedActivities,
-                trips: state.trips.map(t =>
-                    t.id === tripId ? { ...t, lastModified } : t
-                ),
-            };
-        }),
-
-    updateExpense: (id, expenseData, fromSync) =>
-        set((state) => {
-            const expense = state.expenses.find(e => e.id === id);
-            if (!expense) return state;
-
-            const trip = state.trips.find(t => t.id === expense.tripId);
             const lastModified = Date.now();
-
-            const newAmount = expenseData.amount ?? expense.amount;
             const amountOrCurrencyChanged = expenseData.amount !== undefined || expenseData.currency !== undefined;
+            const converted = amountOrCurrencyChanged
+                ? withConvertedAmounts(wallet, {
+                    amount: expenseData.amount ?? expense.amount,
+                    currency: expenseData.currency ?? expense.currency,
+                    convertedAmountTrip: expenseData.convertedAmountTrip,
+                    convertedAmountHome: expenseData.convertedAmountHome,
+                })
+                : {
+                    currency: expense.currency,
+                    convertedAmountTrip: expense.convertedAmountTrip,
+                    convertedAmountHome: expense.convertedAmountHome,
+                };
+            assertSufficientWalletBalance(
+                wallet,
+                converted.convertedAmountTrip,
+                expense.convertedAmountTrip || expense.amount || 0
+            );
 
-            let convertedAmountHome = expense.convertedAmountHome;
-            let convertedAmountTrip = expense.convertedAmountTrip;
-
-            if (amountOrCurrencyChanged) {
-                const walletForExpense = trip?.wallets?.find(w => w.id === expense.walletId);
-                const defaultLot = walletForExpense ? getDefaultLot(walletForExpense as any) : undefined;
-                const lockedRate: number = defaultLot?.lockedRate ?? (walletForExpense as any)?.baselineExchangeRate ?? 1;
-
-                convertedAmountTrip = newAmount;
-                convertedAmountHome = Math.round(convertedAmountTrip * lockedRate * 100) / 100;
-            }
-
-            const updatedExpense: Expense = {
+            let updatedExpense: Expense = {
                 ...expense,
                 ...expenseData,
-                convertedAmountHome,
-                convertedAmountTrip,
+                ...converted,
+                lastModified,
             };
-            updatedExpense.fieldUpdates = stampFieldUpdates(expense.fieldUpdates, { ...expenseData, convertedAmountHome, convertedAmountTrip }, lastModified);
+            updatedExpense.fieldUpdates = stampFieldUpdates(
+                expense.fieldUpdates,
+                { ...expenseData, ...converted },
+                lastModified
+            );
+            const { error: expenseErr } = await supabase.rpc('update_expense_cloud', {
+                p_expense_id: id,
+                p_expense: updatedExpense,
+            });
+            if (expenseErr) throw expenseErr;
+            syncTrace('ExpenseMutation', 'rpc_update_success', summarizeExpenses([updatedExpense]));
 
-            let updatedActivities = state.activities;
-            if (expense.activityId) {
-                updatedActivities = state.activities.map(a =>
-                    a.id === expense.activityId
-                        ? {
-                            ...a,
-                            expenses: a.expenses.map(e => e.id === id ? updatedExpense : e),
-                            lastModified
-                        }
-                        : a
-                );
+            await refreshTripCloudState(tripId);
+            syncTrace('ExpenseMutation', 'refresh_after_update_done', { tripId, expenseId: id });
+        } catch (error: any) {
+            setWalletErrorState(error?.message || 'Check your wallet balances!');
+            syncTrace('ExpenseMutation', 'update_failed', {
+                tripId,
+                expenseId: id,
+                message: error?.message,
+            });
+            console.error('[Expense] Update failed:', error);
+            throw error;
+        } finally {
+            endTripCloudMutation(tripId);
+        }
+    },
+
+    deleteExpense: async (id) => {
+        const tripId = _get().expenses.find(expense => expense.id === id)?.tripId;
+        if (!tripId) return;
+
+        beginTripCloudMutation(tripId);
+        try {
+            setWalletErrorState(null);
+            syncTrace('ExpenseMutation', 'submit_delete', { tripId, expenseId: id });
+
+            const { error: expenseErr } = await supabase.rpc('delete_expense_cloud', {
+                p_expense_id: id,
+            });
+            if (expenseErr) throw expenseErr;
+            syncTrace('ExpenseMutation', 'rpc_delete_success', { tripId, expenseId: id });
+
+            await refreshTripCloudState(tripId);
+            syncTrace('ExpenseMutation', 'refresh_after_delete_done', { tripId, expenseId: id });
+        } catch (error: any) {
+            setWalletErrorState(error?.message || 'Check your wallet balances!');
+            syncTrace('ExpenseMutation', 'delete_failed', {
+                tripId,
+                expenseId: id,
+                message: error?.message,
+            });
+            console.error('[Expense] Delete failed:', error);
+            throw error;
+        } finally {
+            endTripCloudMutation(tripId);
+        }
+    },
+
+    logSpontaneousExpense: async (tripId, walletId, data) => {
+        beginTripCloudMutation(tripId);
+        try {
+            setWalletErrorState(null);
+            syncTrace('ExpenseMutation', 'submit_spontaneous', { tripId, walletId, data });
+            const localTrip = _get().trips.find(trip => trip.id === tripId);
+            const localWallet = localTrip?.wallets.find(wallet => wallet.id === walletId);
+            const wallet = localWallet ?? (await fetchTripCloudBundle(tripId))?.wallets.find(existing => existing.id === walletId);
+            if (!wallet) {
+                syncTrace('ExpenseMutation', 'missing_wallet_for_spontaneous', { tripId, walletId });
+                return;
             }
-
-            if (!fromSync) offlineSync.expenseUpdate(id, updatedExpense);
-
-            // Wallet is NOT affected here — wallet only changes when activity is marked COMPLETE.
-            return {
-                expenses: state.expenses.map(e => e.id === id ? updatedExpense : e),
-                activities: updatedActivities,
-                trips: state.trips.map(t =>
-                    t.id === expense.tripId ? { ...t, lastModified } : t
-                ),
-            };
-        }),
-
-    deleteExpense: (id, fromSync) =>
-        set((state) => {
-            const expense = state.expenses.find(e => e.id === id);
-            if (!expense) return state;
+            syncTrace('ExpenseMutation', 'resolved_wallet_for_spontaneous', {
+                trip: summarizeTrip(localTrip),
+                wallet: summarizeWallet(wallet),
+            });
 
             const lastModified = Date.now();
-
-            let updatedActivities = state.activities;
-            if (expense.activityId) {
-                updatedActivities = state.activities.map(a =>
-                    a.id === expense.activityId ? { ...a, expenses: (a.expenses || []).filter(e => e.id !== id), lastModified } : a
-                );
-            }
-
-            if (!fromSync) offlineSync.expenseDelete(id);
-
-            // Wallet is NOT affected here — wallet only changes when activity is marked COMPLETE.
-            // If deleting an expense from a COMPLETED activity, the activity must be reopened first
-            // (which reverses wallet), so no wallet logic needed here.
-            return {
-                expenses: state.expenses.filter(e => e.id !== id),
-                activities: updatedActivities,
-                trips: state.trips.map(t =>
-                    t.id === expense.tripId ? { ...t, lastModified } : t
-                ),
-            };
-        }),
-
-    logSpontaneousExpense: (tripId, walletId, data) =>
-        set((state) => {
             const activityId = generateId();
             const expenseId = generateId();
-            const curTime = Date.now();
-            const trip = state.trips.find(t => t.id === tripId);
-            const wallet = trip?.wallets?.find(w => w.id === walletId);
-
-            if (!wallet) return state;
-
-            const walletCurrency = wallet.currency;
-
-            let updatedWallet;
-            let breakdown = [];
-            try {
-                const fifoResult = applyExpenseFIFO(wallet as any, data.amount);
-                updatedWallet = fifoResult.updatedWallet;
-                breakdown = fifoResult.breakdown;
-            } catch (e: any) {
-                console.warn('applyExpenseFIFO Failed (spontaneous):', e);
-                return { ...state, walletError: e.message || 'Check your wallet balances!' };
-            }
-
             const defaultLot = getDefaultLot(wallet as any);
-            const lockedRate: number = defaultLot?.lockedRate ?? (wallet as any).baselineExchangeRate ?? 1;
-
-            const convertedAmountTrip: number = (data as any).convertedAmountTrip ?? data.amount;
-            const convertedAmountHome: number = (data as any).convertedAmountHome ?? Math.round(convertedAmountTrip * lockedRate * 100) / 100;
+            const lockedRate = defaultLot?.lockedRate ?? wallet.baselineExchangeRate ?? 1;
+            const convertedAmountTrip = data.amount;
+            const convertedAmountHome = Math.round(convertedAmountTrip * lockedRate * 100) / 100;
+            assertSufficientWalletBalance(wallet, convertedAmountTrip);
 
             const newExpense: Expense = {
                 id: expenseId,
@@ -192,82 +290,88 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 activityId,
                 name: data.title,
                 amount: data.amount,
-                currency: walletCurrency,
-                convertedAmountHome,
+                currency: wallet.currency,
                 convertedAmountTrip,
+                convertedAmountHome,
                 category: data.category,
                 date: data.date,
-                time: curTime,
+                time: lastModified,
                 originalAmount: data.originalAmount,
                 originalCurrency: data.originalCurrency,
-                lotBreakdown: breakdown,
                 version: 1,
                 deletedAt: null,
+                lastModified,
+                fieldUpdates: stampFieldUpdates({}, {
+                    tripId,
+                    walletId,
+                    activityId,
+                    name: data.title,
+                    amount: data.amount,
+                    currency: wallet.currency,
+                    convertedAmountTrip,
+                    convertedAmountHome,
+                    category: data.category,
+                    date: data.date,
+                    time: lastModified,
+                    originalAmount: data.originalAmount,
+                    originalCurrency: data.originalCurrency,
+                }, lastModified),
             };
-            newExpense.fieldUpdates = stampFieldUpdates({}, { ...newExpense });
 
             const newActivity: Activity = {
                 id: activityId,
-                tripId: tripId,
+                tripId,
                 walletId,
                 title: data.title,
                 category: data.category,
                 date: data.date,
-                time: curTime,
+                time: lastModified,
                 allocatedBudget: data.amount,
-                budgetCurrency: walletCurrency,
+                budgetCurrency: wallet.currency,
                 isCompleted: true,
                 isSpontaneous: true,
-                lastModified: curTime,
+                lastModified,
                 expenses: [newExpense],
                 countries: [],
                 version: 1,
                 deletedAt: null,
+                fieldUpdates: stampFieldUpdates({}, {
+                    tripId,
+                    walletId,
+                    title: data.title,
+                    category: data.category,
+                    date: data.date,
+                    time: lastModified,
+                    allocatedBudget: data.amount,
+                    budgetCurrency: wallet.currency,
+                    isCompleted: true,
+                    isSpontaneous: true,
+                    countries: [],
+                }, lastModified),
             };
-            newActivity.fieldUpdates = stampFieldUpdates({}, { ...newActivity });
+            const { error } = await supabase.rpc('log_spontaneous_expense_cloud', {
+                p_activity: newActivity,
+                p_expense: newExpense,
+            });
+            if (error) throw error;
+            syncTrace('ExpenseMutation', 'rpc_spontaneous_success', {
+                activity: summarizeActivity(newActivity),
+                expense: summarizeExpenses([newExpense]),
+            });
 
-            offlineSync.activity(newActivity);
-            offlineSync.expense(newExpense);
-
-            const allExpensesAfterSpontaneous = [...state.expenses, newExpense];
-            return {
-                activities: [...state.activities, newActivity],
-                expenses: allExpensesAfterSpontaneous,
-                trips: state.trips.map(t => {
-                    if (t.id === tripId) {
-                        const finalWallets = (t.wallets || []).map((w): Wallet => {
-                            if (w.id !== walletId) return w;
-                            const nextSpentAmount = allExpensesAfterSpontaneous
-                                .filter(e => e.walletId === w.id)
-                                .reduce((sum, e) => sum + (e.convertedAmountTrip || 0), 0);
-                            
-                            // [FIX] Update wallet metadata (lastModified, fieldUpdates) to ensure sync propagates
-                            return {
-                                ...w,
-                                lots: updatedWallet.lots,
-                                spentAmount: nextSpentAmount,
-                                lastModified: curTime,
-                                fieldUpdates: stampFieldUpdates(w.fieldUpdates, { lots: updatedWallet.lots, spentAmount: nextSpentAmount }, curTime)
-                            };
-                        });
-
-                        const targetW = finalWallets.find(w => w.id === walletId);
-                        if (targetW) offlineSync.walletUpdate(walletId, targetW);
-
-                        const currentEvents = t.spontaneousEvents || [];
-                        const updatedTrip = {
-                            ...t,
-                            lastModified: curTime,
-                            spontaneousEvents: [...currentEvents, { id: generateId(), amount: convertedAmountHome }],
-                            wallets: finalWallets
-                        };
-
-                        offlineSync.tripUpdate(tripId, updatedTrip);
-
-                        return updatedTrip;
-                    }
-                    return t;
-                })
-            };
-        }),
+            await refreshTripCloudState(tripId);
+            syncTrace('ExpenseMutation', 'refresh_after_spontaneous_done', { tripId, walletId });
+        } catch (error: any) {
+            setWalletErrorState(error?.message || 'Check your wallet balances!');
+            syncTrace('ExpenseMutation', 'spontaneous_failed', {
+                tripId,
+                walletId,
+                message: error?.message,
+            });
+            console.error('[Expense] Spontaneous expense failed:', error);
+            throw error;
+        } finally {
+            endTripCloudMutation(tripId);
+        }
+    },
 });

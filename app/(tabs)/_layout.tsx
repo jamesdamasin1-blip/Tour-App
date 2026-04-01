@@ -1,7 +1,8 @@
 import 'react-native-url-polyfill/auto';
+import { FooterTopFade } from '@/components/FooterTopFade';
 import { TabBg } from '@/components/TabBg';
+import { MeshBackground } from '@/components/MeshBackground';
 import { Feather } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Tabs, usePathname, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -59,25 +60,20 @@ export default function TabLayout() {
     ];
 
     return (
-        <View style={{ flex: 1, backgroundColor: isDark ? '#1A1C18' : '#F2F0E8' }}>
+        <MeshBackground style={{ flex: 1 }}>
             <Tabs
                 screenOptions={{
                     headerShown: false,
+                    sceneStyle: {
+                        backgroundColor: 'transparent',
+                    },
                     tabBarActiveTintColor: isDark ? '#F2F0E8' : '#9EB294',
                     tabBarInactiveTintColor: isDark ? '#9EB294/40' : '#9ca3af',
                     tabBarShowLabel: false,
                     tabBarBackground: () => (
-                        <View style={{ flex: 1 }}>
-                            <View pointerEvents="none" style={{ position: 'absolute', top: -50, left: 0, right: 0, height: 50, zIndex: 1 }}>
-                                <LinearGradient
-                                    colors={[
-                                        isDark ? 'rgba(26, 28, 24, 0)' : 'rgba(242, 240, 232, 0)',
-                                        isDark ? 'rgba(26, 28, 24, 0.95)' : 'rgba(242, 240, 232, 0.95)',
-                                    ]}
-                                    style={{ flex: 1 }}
-                                />
-                            </View>
-                            <TabBg />
+                        <View style={{ flex: 1, overflow: 'visible' }}>
+                            <TabBg overlapTop={34} />
+                            <FooterTopFade isDark={isDark} />
                         </View>
                     ),
                     tabBarStyle: {
@@ -173,7 +169,7 @@ export default function TabLayout() {
                 visible={isAddBuddyOpen}
                 onClose={() => setIsAddBuddyOpen(false)}
             />
-        </View>
+        </MeshBackground>
     );
 }
 

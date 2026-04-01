@@ -37,7 +37,7 @@ export const useNetworkStatus = () => {
                     runSync().then(() => {
                         setSyncStatus(getSyncStatus());
                         setQueueStats(getQueueStats());
-                    }).catch(console.error);
+                    }).catch(err => console.warn('[NetworkStatus] Reconnect sync failed:', err));
                     startSyncLoop();
                 }
                 setIsOnline(true);
@@ -59,7 +59,7 @@ export const useNetworkStatus = () => {
                 runSync().then(() => {
                     setSyncStatus(getSyncStatus());
                     setQueueStats(getQueueStats());
-                }).catch(console.error);
+                }).catch(err => console.warn('[NetworkStatus] Foreground sync failed:', err));
             }
         };
         const sub = AppState.addEventListener('change', handleAppState);

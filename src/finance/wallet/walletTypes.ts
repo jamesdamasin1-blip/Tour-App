@@ -8,6 +8,7 @@ export interface FundingLot {
     lockedRate: number;       // sourceCurrency per walletCurrency (e.g. 15.13 PHP per MYR)
     rateBaseCurrency?: number; // sourceAmount in homeCurrency per 1 walletCurrency (for global totals)
     createdAt: number;
+    entryKind?: 'initial' | 'top_up';
     isDefault?: boolean;
 }
 

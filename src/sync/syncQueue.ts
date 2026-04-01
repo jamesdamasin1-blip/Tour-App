@@ -1,7 +1,8 @@
 /**
- * SYNC QUEUE — Append-only, persistent mutation log.
- * Every store mutation enqueues an event here.
- * Events are consumed by the sync engine when online.
+ * Legacy sync queue for cache-only/device-only writes and draining historic
+ * pending events created before the cloud-first migration.
+ *
+ * Shared collaborative writes should go directly to Supabase RPCs first.
  */
 import { getDB } from '../storage/localDB';
 import { generateId } from '../utils/mathUtils';
@@ -17,7 +18,7 @@ export interface SyncEvent {
     status: 'pending' | 'processing' | 'failed' | 'done';
 }
 
-/** Enqueue a mutation for eventual sync */
+/** Enqueue a legacy mutation for deferred sync. */
 export const enqueueSync = (
     type: SyncEvent['type'],
     tableName: string,
@@ -45,7 +46,7 @@ export const enqueueSync = (
     return event.id;
 };
 
-/** Get all pending events, oldest first */
+/** Get all pending legacy events, oldest first. */
 export const getPendingEvents = (): SyncEvent[] => {
     const db = getDB();
     return db.getAllSync<SyncEvent>(
@@ -53,7 +54,7 @@ export const getPendingEvents = (): SyncEvent[] => {
     );
 };
 
-/** Get failed events eligible for retry (max 5 retries) */
+/** Get failed legacy events eligible for retry (max 5 retries). */
 export const getRetryableEvents = (): SyncEvent[] => {
     const db = getDB();
     return db.getAllSync<SyncEvent>(
@@ -61,19 +62,19 @@ export const getRetryableEvents = (): SyncEvent[] => {
     );
 };
 
-/** Mark event as processing (lock) */
+/** Mark a legacy queue event as processing (lock). */
 export const markProcessing = (eventId: string) => {
     const db = getDB();
     db.runSync(`UPDATE sync_queue SET status = 'processing' WHERE id = ?`, [eventId]);
 };
 
-/** Mark event as done (successfully synced) */
+/** Mark a legacy queue event as done (successfully synced). */
 export const markDone = (eventId: string) => {
     const db = getDB();
     db.runSync(`UPDATE sync_queue SET status = 'done' WHERE id = ?`, [eventId]);
 };
 
-/** Mark event as failed with retry increment */
+/** Mark a legacy queue event as failed with retry increment. */
 export const markFailed = (eventId: string) => {
     const db = getDB();
     db.runSync(
@@ -82,14 +83,14 @@ export const markFailed = (eventId: string) => {
     );
 };
 
-/** Clean up completed events older than 24 hours */
+/** Clean up completed legacy events older than 24 hours. */
 export const pruneCompletedEvents = () => {
     const db = getDB();
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     db.runSync(`DELETE FROM sync_queue WHERE status = 'done' AND timestamp < ?`, [cutoff]);
 };
 
-/** Get queue stats for UI display */
+/** Get queue stats for legacy/offline diagnostics UI. */
 export const getQueueStats = (): { pending: number; failed: number; total: number } => {
     const db = getDB();
     const pending = db.getFirstSync<{ c: number }>(`SELECT COUNT(*) as c FROM sync_queue WHERE status = 'pending'`);
@@ -102,9 +103,9 @@ export const getQueueStats = (): { pending: number; failed: number; total: numbe
     };
 };
 
-/** Batch enqueue — wraps multiple mutations in a single transaction */
+/** Batch enqueue for the remaining legacy mutation paths. */
 export const enqueueBatch = (
-    events: Array<{ type: SyncEvent['type']; tableName: string; recordId: string; payload: Record<string, any> }>
+    events: { type: SyncEvent['type']; tableName: string; recordId: string; payload: Record<string, any> }[]
 ) => {
     const db = getDB();
     const now = Date.now();

@@ -1,53 +1,79 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-    View,
-    Text,
-    TouchableOpacity,
-    StyleSheet,
-    TextInput,
-    ScrollView,
+    ActivityIndicator,
     Dimensions,
-    KeyboardAvoidingView,
-    Platform
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
-import { GlassView } from './GlassView';
 import { AnimatedModal } from './AnimatedModal';
+import { CurrencyInput } from './CurrencyInput';
+import { GlassView } from './GlassView';
 import { PressableScale } from './PressableScale';
 import { RippleButton } from './RippleButton';
-import { CurrencyInput } from './CurrencyInput';
 import { useStore } from '@/src/store/useStore';
-import { CATEGORY_THEME } from '@/src/constants/categories';
-import { ExpenseCategory } from '@/src/types/models';
+import { Activity, ExpenseCategory } from '@/src/types/models';
 import { CurrencyService } from '@/src/services/currency';
 import { CurrencyConversionService } from '@/src/services/currencyConversion';
 import { useTripWallet } from '../src/features/trip/hooks/useTripWallet';
 import { useWalletExchangeRate } from '@/src/hooks/useWalletExchangeRate';
+import { syncTrace } from '@/src/sync/debug';
+import {
+    PRIMARY_ACTION_HEIGHT,
+    PRIMARY_ACTION_RADIUS,
+    PRIMARY_ACTION_TEXT_SIZE,
+} from '@/src/styles/primaryAction';
+import { SpontaneousCategoryPicker } from '@/src/features/activity/components/spontaneous/SpontaneousCategoryPicker';
+import { SpontaneousTripEquivalent } from '@/src/features/activity/components/spontaneous/SpontaneousTripEquivalent';
+import { SpontaneousWalletSelector } from '@/src/features/activity/components/spontaneous/SpontaneousWalletSelector';
+
+export interface SpontaneousExpenseFormData {
+    walletId: string;
+    title: string;
+    amount: number;
+    category: ExpenseCategory;
+    originalAmount?: number;
+    originalCurrency?: string;
+    convertedAmountHome?: number;
+    convertedAmountTrip?: number;
+    date: number;
+}
 
 interface SpontaneousExpenseModalProps {
     visible: boolean;
     onClose: () => void;
-    onLog: (data: {
-        walletId: string;
-        title: string;
-        amount: number;
-        category: ExpenseCategory;
-        originalAmount?: number;
-        originalCurrency?: string;
-        convertedAmountHome?: number;
-        convertedAmountTrip?: number;
-        date: number;
-    }) => void;
+    onLog: (data: SpontaneousExpenseFormData) => void | Promise<void>;
     tripId: string;
     date: number;
+    initialActivity?: Activity | null;
 }
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date }: SpontaneousExpenseModalProps) => {
+const CATEGORIES: ExpenseCategory[] = ['Food', 'Transport', 'Hotel', 'Sightseeing', 'Other'];
+
+const formatInputAmount = (value?: number | null) => {
+    if (!value || !Number.isFinite(value)) return '';
+    const rounded = Number(value.toFixed(2));
+    return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+};
+
+export const SpontaneousExpenseModal = ({
+    visible,
+    onClose,
+    onLog,
+    tripId,
+    date,
+    initialActivity = null,
+}: SpontaneousExpenseModalProps) => {
     const { theme, currencyRates } = useStore();
     const isDark = theme === 'dark';
+    const isEditing = !!initialActivity;
+    const initForOpenRef = useRef(false);
 
     const { walletsStats, homeCurrency } = useTripWallet(tripId);
 
@@ -57,229 +83,318 @@ export const SpontaneousExpenseModal = ({ visible, onClose, onLog, tripId, date 
     const [selectedWalletId, setSelectedWalletId] = useState('');
     const [selectedCurrency, setSelectedCurrency] = useState('PHP');
     const [isWalletModalVisible, setIsWalletModalVisible] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
 
-    const activeWallet = useMemo(() => {
-        return walletsStats.find(w => w.walletId === selectedWalletId) || walletsStats[0];
-    }, [walletsStats, selectedWalletId]);
-
+    const activeWallet = useMemo(
+        () => walletsStats.find(wallet => wallet.walletId === selectedWalletId) || walletsStats[0],
+        [walletsStats, selectedWalletId]
+    );
     const tripCurrency = activeWallet?.currency || 'PHP';
 
-    const { baselineRate } = useWalletExchangeRate(tripId, selectedWalletId || activeWallet?.walletId || '');
+    const { baselineRate } = useWalletExchangeRate(
+        tripId,
+        selectedWalletId || activeWallet?.walletId || ''
+    );
+    const effectiveRate = activeWallet?.effectiveRate || baselineRate || 1;
 
-    // Sync wallet and currency on visible
+    const reclaimableTripAmount = useMemo(() => {
+        if (!initialActivity?.expenses?.length || !selectedWalletId) return 0;
+        return initialActivity.expenses.reduce((sum, expense) => (
+            expense.walletId === selectedWalletId
+                ? sum + (expense.convertedAmountTrip || expense.amount || 0)
+                : sum
+        ), 0);
+    }, [initialActivity?.expenses, selectedWalletId]);
+
+    const availableTripBalance = (activeWallet?.balance || 0) + reclaimableTripAmount;
+
     useEffect(() => {
-        if (visible && walletsStats.length > 0) {
-            const initialWallet = walletsStats[0];
-            setSelectedWalletId(initialWallet.walletId);
-            setSelectedCurrency(initialWallet.currency);
+        if (!visible) {
+            initForOpenRef.current = false;
+            return;
         }
-    }, [visible, walletsStats]);
+        if (initForOpenRef.current || walletsStats.length === 0) return;
+        initForOpenRef.current = true;
 
-    const categories: ExpenseCategory[] = ['Food', 'Transport', 'Hotel', 'Sightseeing', 'Other'];
+        if (initialActivity) {
+            const initialExpense = initialActivity.expenses?.[0];
+            const initialWalletId =
+                initialExpense?.walletId ||
+                initialActivity.walletId ||
+                walletsStats[0].walletId;
+            const wallet = walletsStats.find(item => item.walletId === initialWalletId) || walletsStats[0];
+            const initialCurrency =
+                initialExpense?.originalCurrency ||
+                initialExpense?.currency ||
+                wallet.currency;
+            const initialAmount = initialExpense?.originalAmount ?? (
+                initialCurrency === homeCurrency
+                    ? initialExpense?.convertedAmountHome
+                    : initialExpense?.convertedAmountTrip ?? initialExpense?.amount
+            );
 
-    // Calculate conversions using baseline rate (same logic as useAddExpense)
+            setTitle(initialActivity.title || '');
+            setAmount(formatInputAmount(initialAmount));
+            setCategory(initialActivity.category || 'Other');
+            setSelectedWalletId(initialWalletId);
+            setSelectedCurrency(initialCurrency);
+            return;
+        }
+
+        const initialWallet = walletsStats[0];
+        setTitle('');
+        setAmount('');
+        setCategory('Other');
+        setSelectedWalletId(initialWallet.walletId);
+        setSelectedCurrency(initialWallet.currency);
+    }, [visible, walletsStats, initialActivity, homeCurrency]);
+
     const conversions = useMemo(() => {
         const value = CurrencyService.parseInput(amount);
         if (value <= 0) return { home: 0, trip: 0 };
 
-        let amountInTrip = 0;
-        let amountInHome = 0;
-
         if (selectedCurrency === tripCurrency) {
-            amountInTrip = value;
-            amountInHome = CurrencyConversionService.toHome(value, baselineRate);
-        } else if (selectedCurrency === homeCurrency) {
-            amountInHome = value;
-            amountInTrip = CurrencyConversionService.fromHome(value, baselineRate);
-        } else {
-            // Fallback for random currencies
-            const rates = (currencyRates.rates || {}) as any;
-            const hRate = rates[homeCurrency] || 1;
-            const tRate = rates[tripCurrency] || 1;
-            const eRate = rates[selectedCurrency] || 1;
-            amountInTrip = CurrencyService.convert(value, eRate, tRate);
-            amountInHome = CurrencyService.convert(value, eRate, hRate);
+            return {
+                trip: value,
+                home: CurrencyConversionService.toHome(value, effectiveRate),
+            };
         }
 
-        return { home: amountInHome, trip: amountInTrip };
-    }, [amount, selectedCurrency, tripCurrency, homeCurrency, currencyRates, baselineRate]);
+        if (selectedCurrency === homeCurrency) {
+            return {
+                home: value,
+                trip: CurrencyConversionService.fromHome(value, effectiveRate),
+            };
+        }
 
-    const handleLog = () => {
-        if (!title || !amount || !selectedWalletId) return;
-        
+        const rates = (currencyRates.rates || {}) as Record<string, number>;
+        const homeRate = rates[homeCurrency] || 1;
+        const tripRate = rates[tripCurrency] || 1;
+        const inputRate = rates[selectedCurrency] || 1;
+
+        return {
+            trip: CurrencyService.convert(value, inputRate, tripRate),
+            home: CurrencyService.convert(value, inputRate, homeRate),
+        };
+    }, [amount, currencyRates, effectiveRate, homeCurrency, selectedCurrency, tripCurrency]);
+
+    const availableBalanceSelected = selectedCurrency === homeCurrency
+        ? availableTripBalance * effectiveRate
+        : availableTripBalance;
+    const amountExceedsWallet = conversions.trip > availableTripBalance + 0.01;
+    const amountValidationError = amountExceedsWallet
+        ? `Amount exceeds available ${selectedCurrency} ${availableBalanceSelected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+        : '';
+    const amountHelperText = `Available in wallet: ${selectedCurrency} ${availableBalanceSelected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
+
+    const handleLog = async () => {
+        if (isSaving || !title || !amount || !selectedWalletId) return;
+
         const value = CurrencyService.parseInput(amount);
-        if (value <= 0) return;
+        if (value <= 0 || amountExceedsWallet) return;
 
-        onLog({
-            walletId: selectedWalletId,
+        syncTrace('SpontaneousModal', 'submit_pressed', {
+            tripId,
+            isEditing,
+            selectedWalletId,
+            selectedCurrency,
             title,
-            amount: conversions.trip,
+            enteredAmount: value,
+            convertedTrip: conversions.trip,
+            convertedHome: conversions.home,
             category,
-            originalAmount: value,
-            originalCurrency: selectedCurrency,
-            convertedAmountHome: conversions.home,
-            convertedAmountTrip: conversions.trip,
-            date: date
+            date,
         });
 
-        setTitle('');
-        setAmount('');
-        setCategory('Other');
-        onClose();
+        try {
+            setIsSaving(true);
+            await Promise.resolve(onLog({
+                walletId: selectedWalletId,
+                title,
+                amount: conversions.trip,
+                category,
+                originalAmount: value,
+                originalCurrency: selectedCurrency,
+                convertedAmountHome: conversions.home,
+                convertedAmountTrip: conversions.trip,
+                date,
+            }));
+            syncTrace('SpontaneousModal', 'submit_completed', {
+                tripId,
+                isEditing,
+                selectedWalletId,
+                title,
+                convertedTrip: conversions.trip,
+                convertedHome: conversions.home,
+            });
+            onClose();
+        } catch (error: any) {
+            syncTrace('SpontaneousModal', 'submit_failed', {
+                tripId,
+                isEditing,
+                selectedWalletId,
+                message: error?.message,
+            });
+            throw error;
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     return (
         <AnimatedModal visible={visible} onClose={onClose}>
-                    <GlassView
-                        intensity={isDark ? 50 : 95}
-                        borderRadius={32}
-                        backgroundColor={isDark ? "rgba(30, 32, 28, 0.98)" : "rgba(255, 255, 255, 0.98)"}
-                        style={styles.modalView}
-                    >
-                        <View style={styles.header}>
-                            <Text style={[styles.headerTitle, isDark && { color: '#F2F0E8' }]}>SPONTANEOUS LOG</Text>
-                            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                                <Feather name="x" size={24} color={isDark ? "#B2C4AA" : "#5D6D54"} />
-                            </TouchableOpacity>
-                        </View>
+            <GlassView
+                intensity={isDark ? 50 : 95}
+                borderRadius={32}
+                backgroundColor={isDark ? 'rgba(30, 32, 28, 0.98)' : 'rgba(255, 255, 255, 0.98)'}
+                style={styles.modalView}
+            >
+                <View style={styles.header}>
+                    <Text style={[styles.headerTitle, isDark && { color: '#F2F0E8' }]}>
+                        {isEditing ? 'EDIT SPONTANEOUS' : 'SPONTANEOUS LOG'}
+                    </Text>
+                    <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                        <Feather name="x" size={24} color={isDark ? '#B2C4AA' : '#5D6D54'} />
+                    </TouchableOpacity>
+                </View>
 
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-                            <View style={styles.inputSection}>
-                                <Text style={[styles.label, isDark && { color: '#B2C4AA', opacity: 0.6 }]}>WHAT DID YOU BUY?</Text>
-                                <TextInput
-                                    style={[styles.input, isDark && { color: '#F2F0E8', backgroundColor: 'rgba(0,0,0,0.2)', borderColor: 'rgba(158,178,148,0.3)' }]}
-                                    value={title}
-                                    onChangeText={setTitle}
-                                    placeholder="e.g. Street food, Souvenir..."
-                                    placeholderTextColor={isDark ? "rgba(178,196,170,0.3)" : "#9ca3af"}
-                                />
-                            </View>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+                    <View style={styles.inputSection}>
+                        <Text style={[styles.label, isDark && { color: '#B2C4AA', opacity: 0.6 }]}>
+                            WHAT DID YOU BUY?
+                        </Text>
+                        <TextInput
+                            style={[
+                                styles.input,
+                                isDark && {
+                                    color: '#F2F0E8',
+                                    backgroundColor: 'rgba(0,0,0,0.2)',
+                                    borderColor: 'rgba(158,178,148,0.3)',
+                                },
+                            ]}
+                            value={title}
+                            onChangeText={setTitle}
+                            placeholder="e.g. Street food, Souvenir..."
+                            placeholderTextColor={isDark ? 'rgba(178,196,170,0.3)' : '#9ca3af'}
+                        />
+                    </View>
 
-                            {walletsStats.length > 1 && (
-                                <View style={styles.inputSection}>
-                                    <Text style={[styles.label, isDark && { color: '#B2C4AA', opacity: 0.6 }]}>SELECT COUNTRY WALLET</Text>
-                                    <TouchableOpacity 
-                                        style={[styles.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, isDark && { backgroundColor: 'rgba(0,0,0,0.2)', borderColor: 'rgba(158,178,148,0.3)' }]}
-                                        onPress={() => setIsWalletModalVisible(true)}
-                                    >
-                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                            <Text style={{ fontSize: 16, fontWeight: '700', color: isDark ? '#F2F0E8' : '#111827' }}>{activeWallet?.country}</Text>
-                                            <Text style={{ fontSize: 14, fontWeight: '500', color: isDark ? '#9EB294' : '#64748b', marginLeft: 8 }}>({activeWallet?.currency})</Text>
-                                        </View>
-                                        <Feather name="chevron-down" size={20} color={isDark ? "#B2C4AA" : "#5D6D54"} />
-                                    </TouchableOpacity>
-                                </View>
-                            )}
+                    {walletsStats.length > 1 && (
+                        <SpontaneousWalletSelector
+                            isDark={isDark}
+                            activeWallet={activeWallet}
+                            onPress={() => setIsWalletModalVisible(true)}
+                        />
+                    )}
 
-                            <CurrencyInput
-                                label="AMOUNT SPENT"
-                                amount={amount}
-                                onAmountChange={setAmount}
-                                currency={selectedCurrency}
-                                onCurrencyChange={setSelectedCurrency}
-                                options={tripCurrency !== homeCurrency ? [tripCurrency, homeCurrency] : [tripCurrency]}
-                                editable={true}
+                    <CurrencyInput
+                        label="AMOUNT SPENT"
+                        amount={amount}
+                        onAmountChange={setAmount}
+                        currency={selectedCurrency}
+                        onCurrencyChange={setSelectedCurrency}
+                        options={tripCurrency !== homeCurrency ? [tripCurrency, homeCurrency] : [tripCurrency]}
+                        editable
+                        error={amountValidationError}
+                        helperText={amountHelperText}
+                    />
+
+                    {selectedCurrency !== tripCurrency && (
+                        <SpontaneousTripEquivalent
+                            isDark={isDark}
+                            tripCurrency={tripCurrency}
+                            tripAmount={conversions.trip}
+                        />
+                    )}
+
+                    <SpontaneousCategoryPicker
+                        isDark={isDark}
+                        category={category}
+                        categories={CATEGORIES}
+                        onSelect={setCategory}
+                    />
+                </ScrollView>
+
+                <RippleButton
+                    style={[
+                        styles.logButton,
+                        { backgroundColor: isDark ? '#B2C4AA' : '#5D6D54' },
+                        (isSaving || !title || !amount || amountExceedsWallet) && styles.logButtonDisabled,
+                    ]}
+                    onPress={handleLog}
+                    disabled={isSaving || !title || !amount || amountExceedsWallet}
+                    glowColor={isDark ? 'rgba(178, 196, 170, 0.5)' : 'rgba(93, 109, 84, 0.4)'}
+                >
+                    {isSaving ? (
+                        <ActivityIndicator color={isDark ? '#1a1a1a' : '#FFFFFF'} size="small" />
+                    ) : (
+                        <>
+                            <Text style={[styles.logButtonText, { color: isDark ? '#1a1a1a' : '#fff' }]}>
+                                {isEditing ? 'SAVE CHANGES' : 'LOG EXPENSE'}
+                            </Text>
+                            <Feather
+                                name="check-circle"
+                                size={20}
+                                color={isDark ? '#1a1a1a' : '#fff'}
+                                style={{ marginLeft: 8 }}
                             />
+                        </>
+                    )}
+                </RippleButton>
+            </GlassView>
 
-                            {selectedCurrency !== tripCurrency && (
-                                <View style={{ marginBottom: 24 }}>
-                                    <View style={[styles.previewContainer, { backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : 'rgba(93, 109, 84, 0.05)', borderColor: isDark ? 'rgba(158, 178, 148, 0.3)' : 'rgba(93, 109, 84, 0.15)' }]}>
-                                        <Text style={[styles.previewLabel, { color: isDark ? '#B2C4AA' : '#5D6D54' }]}>TRIP CURRENCY EQUIVALENT</Text>
-                                        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                                            <Text style={{ fontSize: 16, fontWeight: '900', color: isDark ? '#B2C4AA' : '#5D6D54' }}>{tripCurrency}</Text>
-                                            <Text style={{ fontSize: 24, fontWeight: '900', color: isDark ? '#F2F0E8' : '#1a1a1a', marginLeft: 8 }}>
-                                                {conversions.trip.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                </View>
-                            )}
-
-                            <View style={styles.inputSection}>
-                                <Text style={[styles.label, isDark && { color: '#B2C4AA', opacity: 0.6 }]}>CATEGORY</Text>
-                                <View style={styles.categoriesContainer}>
-                                    {categories.map(cat => (
-                                        <TouchableOpacity
-                                            key={cat}
-                                            style={[
-                                                styles.categoryItem,
-                                                { backgroundColor: category === cat ? CATEGORY_THEME[cat].color : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)') },
-                                                { borderColor: category === cat ? CATEGORY_THEME[cat].color : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)') }
-                                            ]}
-                                            onPress={() => setCategory(cat)}
-                                        >
-                                            <Feather 
-                                                name={CATEGORY_THEME[cat].icon as any} 
-                                                size={16} 
-                                                color={category === cat ? '#fff' : (isDark ? '#B2C4AA' : CATEGORY_THEME[cat].color)} 
-                                            />
-                                            <Text style={[
-                                                styles.categoryText,
-                                                { color: category === cat ? '#fff' : (isDark ? '#F2F0E8' : '#1a1a1a') }
-                                            ]}>{cat.toUpperCase()}</Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                            </View>
-                        </ScrollView>
-
-                        <RippleButton
-                            style={[styles.logButton, { backgroundColor: isDark ? '#B2C4AA' : '#5D6D54' }, (!title || !amount) && styles.logButtonDisabled]}
-                            onPress={handleLog}
-                            disabled={!title || !amount}
-                            glowColor={isDark ? 'rgba(178, 196, 170, 0.5)' : 'rgba(93, 109, 84, 0.4)'}
-                        >
-                            <Text style={[styles.logButtonText, { color: isDark ? '#1a1a1a' : '#fff' }]}>LOG EXPENSE</Text>
-                            <Feather name="check-circle" size={20} color={isDark ? "#1a1a1a" : "#fff"} style={{ marginLeft: 8 }} />
-                        </RippleButton>
-                    </GlassView>
-
-            {/* Wallet Selection Modal */}
             <AnimatedModal visible={isWalletModalVisible} onClose={() => setIsWalletModalVisible(false)}>
-                        <GlassView
-                            style={{ borderRadius: 32, padding: 32, width: SCREEN_WIDTH - 64 }}
-                            intensity={isDark ? 80 : 95}
-                            backgroundColor={isDark ? "#1a1a1a" : "white"}
+                <GlassView
+                    style={{ borderRadius: 32, padding: 32, width: SCREEN_WIDTH - 64 }}
+                    intensity={isDark ? 80 : 95}
+                    backgroundColor={isDark ? '#1a1a1a' : 'white'}
+                >
+                    <Text style={styles.walletModalTitle}>Select Wallet</Text>
+                    {walletsStats.map(wallet => (
+                        <PressableScale
+                            key={wallet.walletId}
+                            style={[
+                                styles.currencyItem,
+                                wallet.walletId === selectedWalletId && {
+                                    backgroundColor: isDark
+                                        ? 'rgba(158,178,148,0.1)'
+                                        : 'rgba(93,109,84,0.05)',
+                                    borderColor: isDark ? '#B2C4AA' : '#5D6D54',
+                                },
+                            ]}
+                            onPress={() => {
+                                setSelectedWalletId(wallet.walletId);
+                                setSelectedCurrency(wallet.currency);
+                                setIsWalletModalVisible(false);
+                            }}
                         >
-                            <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#F2F0E8' : '#1a1a1a', textTransform: 'uppercase', marginBottom: 24, textAlign: 'center' }}>Select Wallet</Text>
-                            {walletsStats.map((wallet) => (
-                                <PressableScale
-                                    key={wallet.walletId}
-                                    style={[styles.currencyItem, wallet.walletId === selectedWalletId && { backgroundColor: isDark ? 'rgba(158,178,148,0.1)' : 'rgba(93,109,84,0.05)', borderColor: isDark ? '#B2C4AA' : '#5D6D54' }]}
-                                    onPress={() => {
-                                        setSelectedWalletId(wallet.walletId);
-                                        setSelectedCurrency(wallet.currency);
-                                        setIsWalletModalVisible(false);
-                                    }}
+                            <View>
+                                <Text
+                                    style={[
+                                        styles.currencyItemText,
+                                        { color: isDark ? '#F2F0E8' : '#1a1a1a' },
+                                    ]}
                                 >
-                                    <View>
-                                        <Text style={[styles.currencyItemText, { color: isDark ? '#F2F0E8' : '#1a1a1a' }]}>{wallet.country}</Text>
-                                        <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#9EB294' : '#64748b' }}>{wallet.currency}</Text>
-                                    </View>
-                                    {wallet.walletId === selectedWalletId && <Feather name="check-circle" size={20} color={isDark ? "#B2C4AA" : "#5D6D54"} />}
-                                </PressableScale>
-                            ))}
-                        </GlassView>
+                                    {wallet.country}
+                                </Text>
+                                <Text style={styles.currencySubtext}>{wallet.currency}</Text>
+                            </View>
+                            {wallet.walletId === selectedWalletId && (
+                                <Feather
+                                    name="check-circle"
+                                    size={20}
+                                    color={isDark ? '#B2C4AA' : '#5D6D54'}
+                                />
+                            )}
+                        </PressableScale>
+                    ))}
+                </GlassView>
             </AnimatedModal>
         </AnimatedModal>
     );
 };
 
 const styles = StyleSheet.create({
-    centeredView: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    container: {
-        width: '100%',
-        paddingHorizontal: 20,
-        alignItems: 'center',
-    },
-    cardWrapper: {
-        width: '100%',
-        maxWidth: 420,
-    },
     modalView: {
         width: '100%',
         padding: 24,
@@ -325,36 +440,10 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(0,0,0,0.05)',
     },
-    modeToggle: { flexDirection: 'row', borderRadius: 16, padding: 4, borderWidth: 1, marginBottom: 16 },
-    modeButton: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 12 },
-    modeButtonText: { fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-    rateInput: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 16, paddingHorizontal: 16, height: 56, marginBottom: 12 },
-    manualTextInput: { flex: 1, fontSize: 16, fontWeight: '700', marginLeft: 12 },
-    previewContainer: { padding: 16, borderRadius: 20, borderWidth: 1, borderStyle: 'dashed', marginBottom: 24 },
-    previewLabel: { fontSize: 9, fontWeight: '900', letterSpacing: 1, marginBottom: 4 },
-    categoriesContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 8,
-    },
-    categoryItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        borderRadius: 16,
-        borderWidth: 1,
-    },
-    categoryText: {
-        fontSize: 11,
-        fontWeight: '800',
-        marginLeft: 8,
-        letterSpacing: 0.5,
-    },
     logButton: {
-        height: 60,
+        height: PRIMARY_ACTION_HEIGHT,
         backgroundColor: '#5D6D54',
-        borderRadius: 20,
+        borderRadius: PRIMARY_ACTION_RADIUS,
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
@@ -370,10 +459,35 @@ const styles = StyleSheet.create({
     },
     logButtonText: {
         color: '#fff',
-        fontSize: 16,
+        fontSize: PRIMARY_ACTION_TEXT_SIZE,
         fontWeight: '900',
         letterSpacing: 2,
     },
-    currencyItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: 'transparent', marginBottom: 8 },
-    currencyItemText: { fontSize: 18, fontWeight: '900' }
+    walletModalTitle: {
+        fontSize: 18,
+        fontWeight: '900',
+        color: '#1a1a1a',
+        textTransform: 'uppercase',
+        marginBottom: 24,
+        textAlign: 'center',
+    },
+    currencyItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 20,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'transparent',
+        marginBottom: 8,
+    },
+    currencyItemText: {
+        fontSize: 18,
+        fontWeight: '900',
+    },
+    currencySubtext: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#64748b',
+    },
 });

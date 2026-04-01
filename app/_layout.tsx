@@ -47,7 +47,7 @@ export default function RootLayout() {
 
     // Periodically fetch currency rates
     CurrencyUtils.fetchRates(currencyRates, cacheRates).catch(console.error);
-  }, []);
+  }, [cacheRates, currencyRates]);
 
   useEffect(() => {
     SystemUI.setBackgroundColorAsync(isDark ? '#1A1C18' : '#F2F0E8').catch(console.error);

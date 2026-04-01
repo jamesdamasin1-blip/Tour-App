@@ -29,7 +29,7 @@ export const PendingInviteBanner = () => {
             unsubscribe();
             appStateSub.remove();
         };
-    }, [isAuthenticated, email]);
+    }, [addRealtimeInvite, email, isAuthenticated, loadReceivedInvites]);
 
     const pendingInvites = invites.filter(i => i.status === 'pending');
 

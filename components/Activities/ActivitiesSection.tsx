@@ -109,3 +109,5 @@ export const ActivitiesSection = React.memo(({
         </View>
     );
 });
+
+ActivitiesSection.displayName = 'ActivitiesSection';

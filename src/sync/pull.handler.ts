@@ -1,26 +1,29 @@
 /**
  * PULL SYNC HANDLER
- * Processes the result of pullRemoteUpdates(): merges pulled data into
- * Zustand store with version-based conflict resolution and FIFO correction.
+ * Processes the result of pullRemoteUpdates(): merges authoritative cloud rows
+ * into the local cache with version-aware conflict handling.
  *
  * This is the batch-pull mirror of sync/realtime/*.handler.ts.
- * Register with: onRemoteUpdate(handlePullUpdate)
- * [SYNC][MERGE][FIFO] prefixed logs for cross-device traceability.
+ * Wallet lots remain server-authoritative; local code only recomputes derived
+ * spent totals from the refreshed expense ledger.
  */
 import { useStore } from '../store/useStore';
 import { recomputeWalletSpent } from '../store/storeHelpers';
-import { deleteRecord, upsertRecord } from '../storage/localDB';
+import { deleteRecord, getDB, upsertRecord } from '../storage/localDB';
 
 type PullPayload = {
     trips?: any[]; activities?: any[]; expenses?: any[]; wallets?: any[];
     sharedTripIds?: string[]; currentUserId?: string;
     deletedTripIds?: string[]; deletedActivityIds?: string[]; deletedExpenseIds?: string[];
 };
+const DEBUG_PULL_LOGS = false;
 
 export function handlePullUpdate(data: PullPayload): void {
     const { trips, activities, expenses, wallets, sharedTripIds,
             deletedTripIds, deletedActivityIds, deletedExpenseIds } = data;
-    console.log(`[SYNC] Pull: trips=${trips?.length ?? 0} act=${activities?.length ?? 0} exp=${expenses?.length ?? 0} wal=${wallets?.length ?? 0}`);
+    if (DEBUG_PULL_LOGS) {
+        console.log(`[SYNC] Pull: trips=${trips?.length ?? 0} act=${activities?.length ?? 0} exp=${expenses?.length ?? 0} wal=${wallets?.length ?? 0}`);
+    }
 
     applyDeletions(deletedTripIds, deletedActivityIds, deletedExpenseIds);
     if (trips?.length)        applyTrips(trips);
@@ -57,13 +60,8 @@ function applyDeletions(tripIds?: string[], activityIds?: string[], expenseIds?:
             // expense ledger; the next wallet pull will correct lot remainingAmounts.
             const updatedTrips = s.trips.map(t => {
                 if (!affected.has(t.id)) return t;
-                const completedActivityIds = new Set(
-                    s.activities.filter(a => a.tripId === t.id && a.isCompleted).map(a => a.id)
-                );
-                const validRemaining = remaining.filter(e =>
-                    e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
-                );
-                return { ...t, wallets: recomputeWalletSpent(t.wallets, validRemaining, s.activities.filter(a => a.tripId === t.id)) };
+                const tripExpenses = remaining.filter(e => e.tripId === t.id);
+                return { ...t, wallets: recomputeWalletSpent(t.wallets, tripExpenses, s.activities.filter(a => a.tripId === t.id)) };
             });
             return {
                 expenses:   remaining,
@@ -83,16 +81,19 @@ function applyTrips(remote: any[]): void {
             if (idx >= 0) {
                 const local = updated[idx];
                 if ((r.version ?? 0) > (local.version ?? 0)) {
-                    // Merge wallets: use remote lots when remote wallet version is newer,
-                    // otherwise preserve local lots (authoritative for FIFO remainingAmount).
-                    const mergedWallets = (r.wallets ?? []).map((rw: any) => {
-                        const lw = (local.wallets ?? []).find((w: any) => w.id === rw.id);
-                        if (!lw) return rw;
-                        const remoteWins = (rw.version ?? 0) > (lw.version ?? 0);
-                        return remoteWins ? rw : { ...rw, lots: lw.lots };
-                    });
-                    updated[idx] = { ...local, ...r, wallets: mergedWallets };
-                    console.log(`[MERGE] Trip ${r.id} remote v${r.version} > local v${local.version}`);
+                    // If the trip row itself is newer and carries wallets, trust that snapshot.
+                    // This is important for member devices: activity completion mirrors updated
+                    // wallet lots into trips.wallets so they can refresh even when the standalone
+                    // wallets table event/pull lags. Preserving stale local lots here would
+                    // discard the creator's newly deducted balance.
+                    updated[idx] = {
+                        ...local,
+                        ...r,
+                        wallets: r.wallets ?? local.wallets,
+                    };
+                    if (DEBUG_PULL_LOGS) {
+                        console.log(`[MERGE] Trip ${r.id} remote v${r.version} > local v${local.version}`);
+                    }
                 }
             } else {
                 updated.push(r);
@@ -127,7 +128,9 @@ function applyWallets(remoteWallets: any[]): void {
 
                 // Remote wallet is newer — take remote lots and fields,
                 // but preserve local-only fields (country, createdAt).
-                console.log(`[MERGE] Wallet ${lw.id} remote v${remoteVersion} > local v${localVersion}`);
+                if (DEBUG_PULL_LOGS) {
+                    console.log(`[MERGE] Wallet ${lw.id} remote v${remoteVersion} > local v${localVersion}`);
+                }
                 return {
                     ...lw,
                     lots: rw.lots ?? lw.lots,
@@ -140,13 +143,8 @@ function applyWallets(remoteWallets: any[]): void {
             });
 
             // Recompute wallet spent from the expense ledger for consistency
-            const completedActivityIds = new Set(
-                s.activities.filter(a => a.tripId === t.id && a.isCompleted).map(a => a.id)
-            );
-            const validExpenses = s.expenses.filter(e => 
-                e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
-            );
-            return { ...t, wallets: recomputeWalletSpent(updatedWallets, validExpenses, s.activities.filter(a => a.tripId === t.id)) };
+            const tripExpenses = s.expenses.filter(e => e.tripId === t.id);
+            return { ...t, wallets: recomputeWalletSpent(updatedWallets, tripExpenses, s.activities.filter(a => a.tripId === t.id)) };
         });
 
         return { trips: updatedTrips };
@@ -170,7 +168,6 @@ function applyActivities(remote: any[], scopedTripIds?: string[]): void {
 
     // In a full sync of alive records, we should evict anything local that's missing from remote
     // UNLESS it's a fresh local mutation (still in the sync_queue).
-    const { getDB } = require('../storage/localDB');
     const db = getDB();
     const pendingIds = new Set(
         db.getAllSync('SELECT recordId FROM sync_queue WHERE status != "done" AND table_name = "activities"')
@@ -195,7 +192,7 @@ function applyActivities(remote: any[], scopedTripIds?: string[]): void {
             if (!remoteMap.has(local.id)) {
                 if (skipEviction || pendingIds.has(local.id)) {
                     // Keep it — either remote was empty (unsafe to evict) or it's a pending mutation
-                    if (pendingIds.has(local.id)) console.log(`[SYNC] Preserving pending activity ${local.id}`);
+                    if (DEBUG_PULL_LOGS && pendingIds.has(local.id)) console.log(`[SYNC] Preserving pending activity ${local.id}`);
                     merged.push(local);
                 } else {
                     // Evict: it was deleted on server or unauthorized
@@ -214,14 +211,8 @@ function applyActivities(remote: any[], scopedTripIds?: string[]): void {
         const updatedTrips = s.trips.map(t => {
             if (!tripIds.has(t.id)) return t;
 
-            const completedActivityIds = new Set(
-                newActivities.filter(a => a.tripId === t.id && a.isCompleted).map(a => a.id)
-            );
-            const validExpenses = s.expenses.filter(e => 
-                e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
-            );
-
-            return { ...t, wallets: recomputeWalletSpent(t.wallets, validExpenses, newActivities.filter(a => a.tripId === t.id)) };
+            const tripExpenses = s.expenses.filter(e => e.tripId === t.id);
+            return { ...t, wallets: recomputeWalletSpent(t.wallets, tripExpenses, newActivities.filter(a => a.tripId === t.id)) };
         });
 
         return { activities: newActivities, trips: updatedTrips };
@@ -241,7 +232,6 @@ function applyExpenses(remote: any[], scopedTripIds?: string[]): void {
         console.warn(`[SYNC] Skipping expense eviction — remote returned 0 but ${localInScopeCount} local expenses exist`);
     }
 
-    const { getDB } = require('../storage/localDB');
     const db = getDB();
     const pendingIds = new Set(
         db.getAllSync('SELECT recordId FROM sync_queue WHERE status != "done" AND table_name = "expenses"')
@@ -282,15 +272,8 @@ function applyExpenses(remote: any[], scopedTripIds?: string[]): void {
         const updatedTrips = s.trips.map(t => {
             if (!tripIds.has(t.id)) return t;
 
-            // Only sum expenses that belong to COMPLETED activities, or lack an activity (spontaneous)
-            const completedActivityIds = new Set(
-                updatedActivities.filter(a => a.tripId === t.id && a.isCompleted).map(a => a.id)
-            );
-            const validExpenses = allExpenses.filter(e => 
-                e.tripId === t.id && (!e.activityId || completedActivityIds.has(e.activityId))
-            );
-
-            return { ...t, wallets: recomputeWalletSpent(t.wallets, validExpenses, updatedActivities.filter(a => a.tripId === t.id)) };
+            const tripExpenses = allExpenses.filter(e => e.tripId === t.id);
+            return { ...t, wallets: recomputeWalletSpent(t.wallets, tripExpenses, updatedActivities.filter(a => a.tripId === t.id)) };
         });
 
         return { expenses: allExpenses, activities: updatedActivities, trips: updatedTrips };

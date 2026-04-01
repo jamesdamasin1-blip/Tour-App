@@ -68,3 +68,5 @@ export const ActivityGroup = React.memo(({
         </View>
     );
 });
+
+ActivityGroup.displayName = 'ActivityGroup';

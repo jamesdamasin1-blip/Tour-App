@@ -1,9 +1,8 @@
 import { useMemo } from 'react';
 import { useStore } from '@/src/store/useStore';
-import { CurrencyConversionService } from '../services/currencyConversion';
 
 export const useWalletExchangeRate = (tripId: string, walletId: string) => {
-    const { trips, updateTrip } = useStore();
+    const { updateTrip } = useStore();
     const trip = useStore(state => state.trips.find(t => t.id === tripId));
     const wallet = useMemo(() => trip?.wallets.find(w => w.id === walletId), [trip, walletId]);
 

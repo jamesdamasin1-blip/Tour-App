@@ -8,6 +8,7 @@ import { ExpenseSlice, createExpenseSlice } from './slices/expenseSlice';
 import { ExchangeEventSlice, createExchangeEventSlice } from './slices/exchangeEventSlice';
 import { SettingsSlice, createSettingsSlice } from './slices/settingsSlice';
 import { InviteSlice, createInviteSlice } from './slices/inviteSlice';
+import { registerStoreBridge } from './storeBridge';
 
 // ─── Composed State ──────────────────────────────────────────────
 
@@ -40,3 +41,8 @@ export const useStore = create<AppState>()(
         }
     )
 );
+
+registerStoreBridge<AppState>({
+    getState: useStore.getState,
+    setState: useStore.setState,
+});

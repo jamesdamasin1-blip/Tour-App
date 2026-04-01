@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, Modal, Platform } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, Modal } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -21,7 +21,7 @@ export const QRScannerModal = ({ isVisible, onClose, onScan }: QRScannerModalPro
             requestPermission();
         }
         return () => { if (scanTimerRef.current) clearTimeout(scanTimerRef.current); };
-    }, [isVisible, permission]);
+    }, [isVisible, permission, requestPermission]);
 
     const handleBarCodeScanned = ({ data }: { data: string }) => {
         if (scanned) return;

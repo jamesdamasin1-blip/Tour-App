@@ -81,7 +81,7 @@ export const ExchangeEventList = ({ tripId, onEdit }: ExchangeEventListProps) =>
                     {event.notes ? (
                         <View className="mt-2 pt-2 border-t" style={{ borderColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }}>
                             <Text className={`text-[9px] italic ${isDark ? 'text-[#B2C4AA]' : 'text-gray-500'}`}>
-                                "{event.notes}"
+                                {`"${event.notes}"`}
                             </Text>
                         </View>
                     ) : null}

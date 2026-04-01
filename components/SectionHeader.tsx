@@ -23,3 +23,5 @@ export const SectionHeader = React.memo(({ title, actionLabel, onAction }: Secti
         </View>
     );
 });
+
+SectionHeader.displayName = 'SectionHeader';

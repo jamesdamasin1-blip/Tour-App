@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
     Dimensions, NativeScrollEvent, NativeSyntheticEvent,
     ScrollView, Text, View,
@@ -114,3 +114,5 @@ export const TotalSpendingCarousel = React.memo(({ totals, totalBudget, currency
         </View>
     );
 });
+
+TotalSpendingCarousel.displayName = 'TotalSpendingCarousel';

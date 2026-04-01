@@ -3,12 +3,12 @@ import { Calculations } from '@/src/utils/mathUtils';
 import { CATEGORY_THEME } from '@/src/constants/categories';
 import { ExpenseCategory } from '@/src/types/models';
 import { Feather } from '@expo/vector-icons';
-import React, { useMemo, useState, useCallback } from 'react';
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useStore } from '../src/store/useStore';
 import Svg, { Circle, G } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { runOnJS } from 'react-native-reanimated';
 
 export type TotalMode = 'overall' | 'planned' | 'spontaneous';
 
@@ -43,14 +43,10 @@ const TABS: { key: TotalMode; label: string }[] = [
     { key: 'spontaneous', label: 'SPONT.' },
 ];
 
-const SPRING_CONFIG = { damping: 20, stiffness: 180, mass: 0.8 };
-
 export const DonutChartCard = React.memo(({ totalBudget, overall, planned, spontaneous, mode, onModeChange, budgetComparison }: DonutChartProps) => {
     const { theme } = useStore();
     const isDark = theme === 'dark';
     const [page, setPage] = useState<0 | 1>(0);
-
-    const togglePage = useCallback(() => setPage(p => p === 0 ? 1 : 0), []);
 
     const swipe = Gesture.Pan()
         .activeOffsetX([-15, 15])
@@ -200,6 +196,8 @@ export const DonutChartCard = React.memo(({ totalBudget, overall, planned, spont
         </GestureDetector>
     );
 });
+
+DonutChartCard.displayName = 'DonutChartCard';
 
 /* ── Budget Bars Sub-component ── */
 const BudgetBars = ({ data, isDark }: { data: BudgetComparisonData; isDark: boolean }) => {

@@ -5,12 +5,11 @@ import { CurrencyService } from '../../../services/currency';
 import { useTripWallet } from '../../trip/hooks/useTripWallet';
 import { useWalletExchangeRate } from '../../../hooks/useWalletExchangeRate';
 import { CurrencyConversionService } from '../../../services/currencyConversion';
-import dayjs from 'dayjs';
 import { usePermissions } from '../../../hooks/usePermissions';
 
 export const useAddExpense = (activityId: string) => {
     const router = useRouter();
-    const { theme, addExpense, activities, trips, currencyRates } = useStore();
+    const { theme, addExpense, activities, trips } = useStore();
     const isDark = theme === 'dark';
 
     const activity = useMemo(() => activities.find(a => a.id === activityId), [activities, activityId]);
@@ -35,6 +34,8 @@ export const useAddExpense = (activityId: string) => {
     const [amount, setAmount] = useState('');
     const [currency, setCurrency] = useState(tripCurrency);
     const [isCurrencyModalVisible, setIsCurrencyModalVisible] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const saveLockRef = useRef(false);
 
     // Initialize currency once when tripCurrency becomes available.
     // Ref guard prevents re-setting after the user has changed currency.
@@ -70,8 +71,16 @@ export const useAddExpense = (activityId: string) => {
 
         return { home: amountInHome, trip: amountInTrip };
     }, [amount, currency, baselineRate, tripCurrency, homeCurrency]);
+    const availableBalanceSelected = currency === homeCurrency
+        ? (walletStats?.balance || 0) * baselineRate
+        : (walletStats?.balance || 0);
+    const amountValidationError = conversions.trip > (walletStats?.balance || 0) + 0.01
+        ? `Amount exceeds available ${currency} ${availableBalanceSelected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+        : '';
+    const amountHelperText = `Available in wallet: ${currency} ${availableBalanceSelected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
 
-    const handleSave = () => {
+    const handleSave = async () => {
+        if (saveLockRef.current) return;
         if (!isAdmin || !trip || !activity) return;
         
         const value = CurrencyService.parseInput(amount);
@@ -79,23 +88,36 @@ export const useAddExpense = (activityId: string) => {
             alert('Please enter a valid amount.');
             return;
         }
+        if (amountValidationError) {
+            alert(amountValidationError);
+            return;
+        }
 
-        addExpense(trip.id, activity.walletId, activityId, {
-            name: activity.title,
-            amount: conversions.trip, // Expense Layer in Trip Currency (for wallet/budget)
-            currency: tripCurrency,
-            category: activity.category as any,
-            date: Date.now(),
-            time: Date.now(),
-            originalAmount: value, // Preserving Expense Layer
-            originalCurrency: currency,
-            convertedAmountHome: conversions.home, // Pre-computed Home Layer
-            convertedAmountTrip: conversions.trip, // Pre-computed Trip Layer
-            createdBy: currentMember?.id,
-            version: 1,
-        });
-        
-        router.back();
+        try {
+            saveLockRef.current = true;
+            setIsSaving(true);
+            await addExpense(trip.id, activity.walletId, activityId, {
+                name: activity.title,
+                amount: conversions.trip, // Expense Layer in Trip Currency (for wallet/budget)
+                currency: tripCurrency,
+                category: activity.category as any,
+                date: Date.now(),
+                time: Date.now(),
+                originalAmount: value, // Preserving Expense Layer
+                originalCurrency: currency,
+                convertedAmountHome: conversions.home, // Pre-computed Home Layer
+                convertedAmountTrip: conversions.trip, // Pre-computed Trip Layer
+                createdBy: currentMember?.id,
+                version: 1,
+            });
+            
+            router.back();
+        } catch (error: any) {
+            alert(error?.message || 'Unable to save expense.');
+        } finally {
+            saveLockRef.current = false;
+            setIsSaving(false);
+        }
     };
 
     return {
@@ -103,6 +125,7 @@ export const useAddExpense = (activityId: string) => {
         amount, setAmount,
         currency, setCurrency,
         isCurrencyModalVisible, setIsCurrencyModalVisible,
+        isSaving,
         
         // Data
         isDark, isAdmin,
@@ -110,6 +133,8 @@ export const useAddExpense = (activityId: string) => {
         tripCurrency, homeCurrency,
         availableCurrencies,
         conversions,
+        amountValidationError,
+        amountHelperText,
         
         // Actions
         handleSave

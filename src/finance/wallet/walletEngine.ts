@@ -36,6 +36,7 @@ export const addFundingLot = (
         remainingAmount: convertedAmount,
         lockedRate: rate,
         rateBaseCurrency,
+        entryKind: 'top_up',
         isDefault: true,
         createdAt: Date.now()
     };

@@ -42,7 +42,7 @@ export const AuthLoadingOverlay = ({ message = 'Preparing your trips...' }: { me
                 Animated.timing(dotAnim, { toValue: 0, duration: 800, useNativeDriver: true }),
             ])
         ).start();
-    }, []);
+    }, [dotAnim, fadeAnim, scaleAnim]);
 
     return (
         <MeshBackground style={StyleSheet.absoluteFill}>

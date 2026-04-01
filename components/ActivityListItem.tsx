@@ -15,7 +15,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import { getCategoryTheme } from '../src/constants/categories';
 import { useStore } from '../src/store/useStore';
+import { findAttributedMember, isCollaborativeTrip } from '../src/utils/memberAttribution';
 import { ActivitySummaryModal } from './ActivitySummaryModal';
+import { AnimatedValueText } from './AnimatedValueText';
 import { GlassView } from './GlassView';
 import { ProgressBar } from './ProgressBar';
 
@@ -30,7 +32,9 @@ interface ActivityListItemProps {
 
 const MAX_SWIPE_RIGHT = 110;
 const MAX_SWIPE_LEFT = 110;
-const ACTION_TRIGGER = 80;
+const ACTION_TRIGGER = 92;
+const SWIPE_ACTIVATION_OFFSET = 18;
+const SWIPE_FAIL_VERTICAL_OFFSET = 12;
 const SPRING_CONFIG = { damping: 20, stiffness: 200, mass: 0.8 };
 
 export const ActivityListItem = React.memo(({
@@ -52,22 +56,8 @@ export const ActivityListItem = React.memo(({
 
     // Member color indicator — show when trip is collaborative
     const authorMember = useMemo(() => {
-        const members = trip?.members;
-        if (!members || members.length === 0) return null;
-
-        const authorId = activity.lastModifiedBy || activity.createdBy;
-        if (!authorId) return null;
-
-        let member = members.find(m => m.id === authorId);
-        if (!member) member = members.find(m => m.userId === authorId);
-        if (!member) return null;
-
-        // Only show indicator when trip is collaborative:
-        // either cloud-synced (has remote members) or has multiple local members
-        const isCollaborative = trip?.isCloudSynced || members.length > 1;
-        if (!isCollaborative) return null;
-
-        return member;
+        if (!isCollaborativeTrip(trip)) return null;
+        return findAttributedMember(trip, activity.lastModifiedBy || activity.createdBy);
     }, [trip, activity.lastModifiedBy, activity.createdBy]);
     const memberColor = authorMember?.color || null;
 
@@ -105,47 +95,54 @@ export const ActivityListItem = React.memo(({
     const translateX = useSharedValue(0);
     const hapticFiredRight = useSharedValue(false);
     const hapticFiredLeft = useSharedValue(false);
+    const isSpontaneous = !!activity.isSpontaneous;
+    const canSwipeDelete = !isSpontaneous && !activity.isCompleted;
+    const canSwipeEdit = !activity.isCompleted || isSpontaneous;
+    const canTapIntoCard = !isSpontaneous;
+    const canOpenSummary = canTapIntoCard && activity.expenses.length > 0;
 
     const triggerHaptic = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const isRequestMode = !onDelete && !!onRequestDelete;
     const triggerDelete = () => {
-        if (activity.isCompleted) return;
+        if (!canSwipeDelete) return;
         if (onDelete) onDelete(activity);
         else onRequestDelete?.(activity);
     };
     const triggerEdit = () => {
-        if (activity.isCompleted) return;
+        if (!canSwipeEdit) return;
         onEdit?.(activity);
     };
 
     const pan = Gesture.Pan()
-        .activeOffsetX([-8, 8])
-        .failOffsetY([-10, 10])
-        .enabled(!activity.isCompleted)
+        .activeOffsetX([-SWIPE_ACTIVATION_OFFSET, SWIPE_ACTIVATION_OFFSET])
+        .failOffsetY([-SWIPE_FAIL_VERTICAL_OFFSET, SWIPE_FAIL_VERTICAL_OFFSET])
+        .enabled(canSwipeEdit || canSwipeDelete)
         .onUpdate((e) => {
-            const clamped = Math.max(-MAX_SWIPE_RIGHT, Math.min(MAX_SWIPE_LEFT, e.translationX));
+            const minSwipe = canSwipeDelete ? -MAX_SWIPE_RIGHT : 0;
+            const maxSwipe = canSwipeEdit ? MAX_SWIPE_LEFT : 0;
+            const clamped = Math.max(minSwipe, Math.min(maxSwipe, e.translationX));
             translateX.value = clamped;
 
-            if (clamped < -ACTION_TRIGGER && !hapticFiredRight.value) {
+            if (canSwipeDelete && clamped < -ACTION_TRIGGER && !hapticFiredRight.value) {
                 hapticFiredRight.value = true;
                 runOnJS(triggerHaptic)();
             }
-            if (clamped > -ACTION_TRIGGER && hapticFiredRight.value) {
+            if ((!canSwipeDelete || clamped > -ACTION_TRIGGER) && hapticFiredRight.value) {
                 hapticFiredRight.value = false;
             }
-            if (clamped > ACTION_TRIGGER && !hapticFiredLeft.value) {
+            if (canSwipeEdit && clamped > ACTION_TRIGGER && !hapticFiredLeft.value) {
                 hapticFiredLeft.value = true;
                 runOnJS(triggerHaptic)();
             }
-            if (clamped < ACTION_TRIGGER && hapticFiredLeft.value) {
+            if ((!canSwipeEdit || clamped < ACTION_TRIGGER) && hapticFiredLeft.value) {
                 hapticFiredLeft.value = false;
             }
         })
         .onEnd(() => {
-            if (translateX.value < -ACTION_TRIGGER) {
+            if (canSwipeDelete && translateX.value < -ACTION_TRIGGER) {
                 translateX.value = withSpring(0, SPRING_CONFIG);
                 runOnJS(triggerDelete)();
-            } else if (translateX.value > ACTION_TRIGGER) {
+            } else if (canSwipeEdit && translateX.value > ACTION_TRIGGER) {
                 translateX.value = withSpring(0, SPRING_CONFIG);
                 runOnJS(triggerEdit)();
             } else {
@@ -189,12 +186,14 @@ export const ActivityListItem = React.memo(({
             <GestureDetector gesture={pan}>
                 <Animated.View style={[styles.cardWrapper, cardAnimStyle, shadowAnimStyle]}>
                     <TouchableOpacity
-                        activeOpacity={0.92}
+                        activeOpacity={canTapIntoCard ? 0.92 : 1}
+                        disabled={!canTapIntoCard}
                         onPress={() => {
-                            if (activity.expenses.length > 0) setIsSummaryVisible(true);
+                            if (!canTapIntoCard) return;
+                            if (canOpenSummary) setIsSummaryVisible(true);
                             else onPress?.(activity);
                         }}
-                        onLongPress={() => setIsSummaryVisible(true)}
+                        onLongPress={canOpenSummary ? () => setIsSummaryVisible(true) : undefined}
                     >
                         <GlassView
                             intensity={isDark ? 50 : 40}
@@ -230,7 +229,7 @@ export const ActivityListItem = React.memo(({
                                 </Animated.View>
                             </Animated.View>
 
-                            {/* Edit gradient tint — hidden when completed (gesture is disabled) */}
+                            {/* Edit gradient tint — spontaneous items stay editable even if completed */}
                             <Animated.View style={[StyleSheet.absoluteFillObject, styles.overlayRadius, editOverlayStyle]} pointerEvents="none">
                                 <LinearGradient
                                     colors={['rgba(59, 130, 246, 0.5)', 'transparent']}
@@ -283,21 +282,24 @@ export const ActivityListItem = React.memo(({
                                             <Text style={[styles.statusLabel, { color: isOverBudget ? '#ef4444' : (isDark ? '#9EB294' : '#5D6D54') }]}>
                                                 {activity.isSpontaneous ? 'COST' : (isOverBudget ? 'EXCEEDED BY' : (varianceHome === 0 ? 'ON POINT' : 'SAVED'))}
                                             </Text>
-                                            <Text style={[styles.statusAmount, { color: isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54') }]}>
-                                                {activity.isSpontaneous
-                                                    ? MathUtils.formatCurrency(totalSpentHome, homeCurrency)
-                                                    : MathUtils.formatCurrency(varianceHome, homeCurrency)
+                                            <AnimatedValueText
+                                                text={
+                                                    activity.isSpontaneous
+                                                        ? MathUtils.formatCurrency(totalSpentHome, homeCurrency)
+                                                        : MathUtils.formatCurrency(varianceHome, homeCurrency)
                                                 }
-                                            </Text>
+                                                style={[styles.statusAmount, { color: isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54') }]}
+                                            />
                                         </View>
                                     ) : allocatedBudgetHome > 0 && !activity.isSpontaneous ? (
                                         <View style={styles.headerRight}>
                                             <Text style={[styles.statusLabel, { color: isDark ? '#9EB294' : '#5D6D54' }]}>
                                                 BUDGET
                                             </Text>
-                                            <Text style={[styles.statusAmount, { color: isDark ? '#B2C4AA' : '#5D6D54' }]}>
-                                                {MathUtils.formatCurrency(allocatedBudgetHome, homeCurrency)}
-                                            </Text>
+                                            <AnimatedValueText
+                                                text={MathUtils.formatCurrency(allocatedBudgetHome, homeCurrency)}
+                                                style={[styles.statusAmount, { color: isDark ? '#B2C4AA' : '#5D6D54' }]}
+                                            />
                                         </View>
                                     ) : null}
                                 </View>
@@ -342,6 +344,8 @@ export const ActivityListItem = React.memo(({
         </View>
     );
 });
+
+ActivityListItem.displayName = 'ActivityListItem';
 
 const styles = StyleSheet.create({
     rootWrapper: { marginBottom: 12, marginHorizontal: 24 },

@@ -9,6 +9,9 @@ import { getSyncMeta, setSyncMeta, clearAllUserData } from '../storage/localDB';
 import { generateId } from '../utils/mathUtils';
 
 WebBrowser.maybeCompleteAuthSession();
+const AUTH_DEBUG_LOGS = false;
+const authStateListeners = new Set<(state: AuthState) => void>();
+let authStateSubscriptionStarted = false;
 
 // ─── Email / Password ─────────────────────────────────────────────
 
@@ -212,35 +215,43 @@ export const signOut = async (clearLocalData = false): Promise<AuthState> => {
 export const onAuthStateChange = (
     callback: (state: AuthState) => void
 ): (() => void) => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log(`[Auth] onAuthStateChange event="${event}" hasSession=${!!session} userId=${session?.user?.id ?? 'null'}`);
-        if (event === 'SIGNED_OUT') {
-            console.warn('[Auth] ⚠ SIGNED_OUT event fired — member will be logged out. Stack:', new Error().stack);
-        }
-        const deviceId = getDeviceId();
-        if (session?.user) {
-            callback({
-                userId: session.user.id,
-                email: session.user.email ?? null,
-                displayName: session.user.user_metadata?.full_name ?? null,
-                isAuthenticated: true,
-                isAnonymous: false,
-                deviceId,
-            });
-        } else {
-            console.warn(`[Auth] ⚠ No session in auth change event="${event}" — setting unauthenticated`);
-            callback({
-                userId: null,
-                email: null,
-                displayName: null,
-                isAuthenticated: false,
-                isAnonymous: true,
-                deviceId,
-            });
-        }
-    });
+    authStateListeners.add(callback);
 
-    return () => subscription.unsubscribe();
+    if (!authStateSubscriptionStarted) {
+        authStateSubscriptionStarted = true;
+        supabase.auth.onAuthStateChange((event, session) => {
+            if (AUTH_DEBUG_LOGS) {
+                console.log(
+                    `[Auth] onAuthStateChange event="${event}" hasSession=${!!session} userId=${session?.user?.id ?? 'null'}`
+                );
+            }
+
+            const deviceId = getDeviceId();
+            const nextState: AuthState = session?.user
+                ? {
+                    userId: session.user.id,
+                    email: session.user.email ?? null,
+                    displayName: session.user.user_metadata?.full_name ?? null,
+                    isAuthenticated: true,
+                    isAnonymous: false,
+                    deviceId,
+                }
+                : {
+                    userId: null,
+                    email: null,
+                    displayName: null,
+                    isAuthenticated: false,
+                    isAnonymous: true,
+                    deviceId,
+                };
+
+            authStateListeners.forEach(listener => listener(nextState));
+        });
+    }
+
+    return () => {
+        authStateListeners.delete(callback);
+    };
 };
 
 /** Link existing local trips to authenticated user */

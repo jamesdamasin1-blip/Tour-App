@@ -4,8 +4,6 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import { useStore } from '@/src/store/useStore';
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface HeaderProps {
@@ -31,11 +29,10 @@ export const Header = React.memo(({
     rightElement, 
     leftElement, 
     bottomElement,
-    showThemeToggle = true,
 }: HeaderProps) => {
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const { theme, toggleTheme } = useStore();
+    const theme = useStore(state => state.theme);
 
     const isDark = theme === 'dark';
 
@@ -67,7 +64,7 @@ export const Header = React.memo(({
                                 } else {
                                     try {
                                         router.back();
-                                    } catch (e) {
+                                    } catch {
                                         console.warn('Navigation not ready');
                                     }
                                 }
@@ -96,21 +93,6 @@ export const Header = React.memo(({
                 <View style={styles.rightBtnContainer}>
                     {rightElement ? (
                         rightElement
-                    ) : showThemeToggle ? (
-                        <TouchableOpacity 
-                            onPress={toggleTheme} 
-                            activeOpacity={0.7}
-                            style={[
-                                styles.themeToggle,
-                                { backgroundColor: isDark ? '#3A3F37' : '#F2F0E8' }
-                            ]}
-                        >
-                            <Feather 
-                                name={isDark ? "sun" : "moon"} 
-                                size={18} 
-                                color={isDark ? "#E9E4BF" : "#5D6D54"} 
-                            />
-                        </TouchableOpacity>
                     ) : null}
                 </View>
             </View>
@@ -124,6 +106,8 @@ export const Header = React.memo(({
         </View>
     );
 });
+
+Header.displayName = 'Header';
 
 const styles = StyleSheet.create({
     container: {
@@ -175,15 +159,6 @@ const styles = StyleSheet.create({
     },
     backBtnInner: {
         padding: 8,
-    },
-    themeToggle: {
-        width: 40, 
-        height: 40,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: 'rgba(158, 178, 148, 0.12)',
     },
     title: {
         fontSize: 18, // Increased for legibility

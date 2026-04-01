@@ -211,6 +211,8 @@ export const DailyBarChart = React.memo(({
     );
 });
 
+DailyBarChart.displayName = 'DailyBarChart';
+
 const styles = StyleSheet.create({
     container: {
         marginBottom: 24,

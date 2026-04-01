@@ -11,50 +11,81 @@ export const useTripWallet = (tripId: string) => {
 
         return trip.wallets.map(wallet => {
             const lots = (wallet as any).lots || [];
-            // Rate is always from the default lot, established at trip creation
+            // Use the latest/default lot for future conversions, but keep totals
+            // historical by summing each lot at its own stored rate.
             const defaultLot = getDefaultLot(wallet as any);
-            // lockedRate = sourceCurrency per walletCurrency, so to get home per wallet:
-            // If sourceCurrency === homeCurrency, then 1 walletCurrency = lockedRate homeCurrency
             const lockedRate = defaultLot?.lockedRate || (wallet as any).baselineExchangeRate || 1;
 
             const balance = getWalletBalance(wallet as any);
             const fundingTotalBase = getFundingTotalGlobalHome(wallet as any, homeCurrency);
-            const addedBudget = lots.length > 1
-                ? lots.slice(1).reduce((sum: number, lot: any) => sum + (lot.originalConvertedAmount ?? lot.convertedAmount ?? 0), 0)
-                : 0;
+            const addedBudget = lots.reduce((sum: number, lot: any, index: number) => {
+                const entryKind = lot.entryKind || (index === 0 ? 'initial' : 'top_up');
+                if (entryKind === 'initial') return sum;
+                return sum + (lot.originalConvertedAmount ?? lot.convertedAmount ?? 0);
+            }, 0);
 
             return {
                 walletId: wallet.id,
                 country: wallet.country,
                 currency: wallet.currency,
-                totalSpent: lots.reduce((sum: number, lot: any) => sum + ((lot.originalConvertedAmount ?? lot.convertedAmount ?? 0) - (lot.remainingAmount || 0)), 0),
+                totalSpent: lots.reduce(
+                    (sum: number, lot: any) =>
+                        sum + ((lot.originalConvertedAmount ?? lot.convertedAmount ?? 0) - (lot.remainingAmount || 0)),
+                    0
+                ),
                 addedBudget,
-                totalExchangedTrip: lots.reduce((sum: number, lot: any) => sum + (lot.originalConvertedAmount ?? lot.convertedAmount ?? 0), 0),
-                totalExchangedHome: fundingTotalBase,  // locked PHP total
+                totalExchangedTrip: lots.reduce(
+                    (sum: number, lot: any) => sum + (lot.originalConvertedAmount ?? lot.convertedAmount ?? 0),
+                    0
+                ),
+                totalExchangedHome: fundingTotalBase,
                 balance,
-                effectiveRate: lockedRate,  // locked rate from trip creation, never live
+                effectiveRate: lockedRate,
                 defaultRate: wallet.defaultRate,
-                // Compute home equivalent per-lot at each lot's own locked rate.
-                // Using a single lockedRate for all lots is wrong when multiple deposits
-                // were made at different exchange rates — leftover MYR from lot 1 would be
-                // re-priced at lot 2's rate, causing small but visible discrepancies.
-                homeEquivalent: lots.reduce((sum: number, lot: any) =>
-                    sum + (lot.remainingAmount || 0) * (lot.lockedRate || lockedRate), 0)
+                // Keep remaining balances historical per lot. Repricing all leftover
+                // funds using the newest default rate distorts wallets after top-ups.
+                homeEquivalent: lots.reduce((sum: number, lot: any) => {
+                    const originalConvertedAmount = Number(lot.originalConvertedAmount ?? lot.convertedAmount ?? 0);
+                    const remainingAmount = Number(lot.remainingAmount || 0);
+                    if (remainingAmount <= 0) return sum;
+
+                    if (lot.sourceCurrency === homeCurrency) {
+                        const sourceAmount = Number(lot.sourceAmount || 0);
+                        const proportionalHome = originalConvertedAmount > 0
+                            ? (sourceAmount * remainingAmount) / originalConvertedAmount
+                            : remainingAmount * Number(lot.lockedRate || lockedRate || 0);
+                        return sum + proportionalHome;
+                    }
+
+                    const homeRate = Number(lot.rateBaseCurrency || 0);
+                    if (homeRate > 0) {
+                        return sum + (remainingAmount * homeRate);
+                    }
+
+                    const sourceAmount = Number(lot.sourceAmount || 0);
+                    const fallbackHome = originalConvertedAmount > 0
+                        ? (sourceAmount * remainingAmount) / originalConvertedAmount
+                        : 0;
+                    return sum + fallbackHome;
+                }, 0),
             };
         });
     }, [trip, homeCurrency]);
 
-    const totalWalletBalanceHome = useMemo(() =>
-        walletsStats.reduce((sum, w) => sum + w.homeEquivalent, 0),
-    [walletsStats]);
+    const totalWalletBalanceHome = useMemo(
+        () => walletsStats.reduce((sum, w) => sum + w.homeEquivalent, 0),
+        [walletsStats]
+    );
 
-    const totalWalletBalanceTrip = useMemo(() =>
-        walletsStats.reduce((sum, w) => sum + w.balance, 0),
-    [walletsStats]);
+    const totalWalletBalanceTrip = useMemo(
+        () => walletsStats.reduce((sum, w) => sum + w.balance, 0),
+        [walletsStats]
+    );
 
-    const totalExchangedHome = useMemo(() =>
-        walletsStats.reduce((sum, w) => sum + w.totalExchangedHome, 0),
-    [walletsStats]);
+    const totalExchangedHome = useMemo(
+        () => walletsStats.reduce((sum, w) => sum + w.totalExchangedHome, 0),
+        [walletsStats]
+    );
 
     return {
         trip,
@@ -62,6 +93,6 @@ export const useTripWallet = (tripId: string) => {
         totalWalletBalanceHome,
         totalWalletBalanceTrip,
         totalExchangedHome,
-        homeCurrency
+        homeCurrency,
     };
 };

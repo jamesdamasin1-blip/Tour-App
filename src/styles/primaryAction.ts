@@ -1,0 +1,4 @@
+export const PRIMARY_ACTION_HEIGHT = 56;
+export const PRIMARY_ACTION_RADIUS = 18;
+export const PRIMARY_ACTION_TEXT_SIZE = 14;
+export const PRIMARY_ACTION_TRACKING = 2;

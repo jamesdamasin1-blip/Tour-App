@@ -10,20 +10,56 @@
  * [SYNC][MERGE] prefixed logs for traceability across devices.
  */
 import type { StateSnapshot, HandlerResult } from './types';
+import { isSelfEmitted } from '../guards/device.guard';
+import { isDeletion } from '../guards/deletion.guard';
+import { mapActivityFromDb } from '../../mappers/activity.mapper';
+import { syncTrace, summarizeRealtimePayload } from '../debug';
 
-export function handleActivityChange(payload: any, _state: StateSnapshot): HandlerResult {
+export function handleActivityChange(payload: any, state: StateSnapshot): HandlerResult {
+    if (isSelfEmitted(payload)) {
+        syncTrace('ActivityRT', 'skip_self_emitted', summarizeRealtimePayload(payload));
+        return { patch: null };
+    }
+
     const row = payload.new ?? payload.old;
-    if (!row?.id) return { patch: null };
+    if (!row?.id) {
+        syncTrace('ActivityRT', 'skip_missing_id', summarizeRealtimePayload(payload));
+        return { patch: null };
+    }
 
-    console.log(`[REALTIME] Activity ${payload.eventType} for ${row.id} (trip: ${row.trip_id}) received. Delegating to Hard Refetch Strategy.`);
+    const incoming = { ...mapActivityFromDb(row), expenses: [] as any[] };
 
-    // HARD REFETCH STRATEGY: Do not patch local state, do not trust incoming payload.
-    // Force a full refetch for ALL clients so every device sees the authoritative DB state.
-    // NOTE: Do NOT guard on specific columns here — Supabase may omit unchanged columns from
-    // the realtime payload (e.g. when only is_completed changes, allocated_budget may be absent),
-    // which would silently block the event for all subscribed clients.
+    if (isDeletion(payload.eventType, row)) {
+        syncTrace('ActivityRT', 'delete_patch_only', summarizeRealtimePayload(payload));
+        return {
+            patch: {
+                activities: state.activities.filter(a => a.id !== incoming.id),
+                expenses: state.expenses.filter(e => e.activityId !== incoming.id),
+            },
+        };
+    }
+
+    const existing = state.activities.find(a => a.id === incoming.id);
+    const tripExists = state.trips.some(t => t.id === incoming.tripId);
+    if (!tripExists) {
+        syncTrace('ActivityRT', 'missing_trip_refetch', summarizeRealtimePayload(payload));
+        return {
+            patch: null,
+            triggerRefetchTripId: incoming.tripId,
+        };
+    }
+
+    syncTrace('ActivityRT', 'patch_activity_row', summarizeRealtimePayload(payload));
     return {
-        patch: null,
-        triggerRefetchTripId: row.trip_id,
+        patch: {
+            activities: [
+                ...state.activities.filter(a => a.id !== incoming.id),
+                {
+                    ...(existing || {}),
+                    ...incoming,
+                    expenses: state.expenses.filter(e => e.activityId === incoming.id),
+                } as any,
+            ],
+        },
     };
 }

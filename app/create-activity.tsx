@@ -1,5 +1,6 @@
-import React from 'react';
-import { View, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Text, Modal } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Text, Modal, ActivityIndicator } from 'react-native';
+import { BottomFade } from '../components/BottomFade';
 import { RippleButton } from '../components/RippleButton';
 import { useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -17,10 +18,16 @@ import { useCreateActivity } from '../src/features/activity/hooks/useCreateActiv
 import { ActivityFormDetails } from '../src/features/activity/components/ActivityFormDetails';
 import { ActivityFormSchedule } from '../src/features/activity/components/ActivityFormSchedule';
 import { ActivityFormFinance } from '../src/features/activity/components/ActivityFormFinance';
+import {
+    PRIMARY_ACTION_HEIGHT,
+    PRIMARY_ACTION_RADIUS,
+    PRIMARY_ACTION_TEXT_SIZE,
+} from '../src/styles/primaryAction';
 
 export default function CreateActivityScreen() {
     const { tripId, activityId } = useLocalSearchParams<{ tripId: string, activityId: string }>();
     const insets = useSafeAreaInsets();
+    const [showBottomFade, setShowBottomFade] = useState(false);
     
     const {
         // State & Actions
@@ -30,13 +37,15 @@ export default function CreateActivityScreen() {
         description, setDescription,
         budgetCurrency, setBudgetCurrency,
         actualCurrency, setActualCurrency,
-        selectedCountries, setSelectedCountries,
         date, setDate,
         startTime, setStartTime,
         endTime, setEndTime,
         actualCost, setActualCost,
         errors, setErrors,
-        handleSave, toggleCountry,
+        actualCostHelperText,
+        actualCostValidationError,
+        handleSave,
+        isSaving,
         
         // UI State
         isDark, isAdmin,
@@ -46,16 +55,24 @@ export default function CreateActivityScreen() {
         
         // Data
         currentTrip,
-        availableCurrencies,
+        budgetAvailableCurrencies,
+        actualAvailableCurrencies,
         hasExpenses,
     } = useCreateActivity(tripId, activityId);
+
+    const handleScroll = useCallback((event: any) => {
+        const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+        const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 40;
+        const isScrollable = contentSize.height > layoutMeasurement.height;
+        setShowBottomFade(isScrollable && !isCloseToBottom);
+    }, []);
 
 
     return (
         <MeshBackground>
             <StatusBar style={isDark ? 'light' : 'dark'} />
             <KeyboardAvoidingView
-                behavior="padding"
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 className="flex-1"
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
             >
@@ -70,6 +87,8 @@ export default function CreateActivityScreen() {
                     contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12, paddingBottom: insets.bottom + 80 }}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
+                    onScroll={handleScroll}
+                    scrollEventThrottle={16}
                 >
                     <GlassView intensity={isDark ? 50 : 80} borderRadius={32} style={{ padding: 2 }}>
                         <ActivityFormDetails
@@ -105,39 +124,58 @@ export default function CreateActivityScreen() {
                             setActualCost={setActualCost}
                             actualCurrency={actualCurrency}
                             setActualCurrency={setActualCurrency}
-                            availableCurrencies={availableCurrencies}
+                            budgetAvailableCurrencies={budgetAvailableCurrencies}
+                            actualAvailableCurrencies={actualAvailableCurrencies}
                             isDark={isDark}
                             isAdmin={isAdmin}
                             activityId={activityId}
                             hasExpenses={hasExpenses}
                             errors={errors}
+                            actualCostHelperText={actualCostHelperText}
+                            actualCostValidationError={actualCostValidationError}
                         />
                     </GlassView>
 
                     {/* Button below the card */}
                     <RippleButton
                         onPress={handleSave}
+                        disabled={isSaving}
                         glowColor={isDark ? 'rgba(178, 196, 170, 0.5)' : 'rgba(93, 109, 84, 0.4)'}
                         style={{
                             marginTop: 24,
-                            height: 64,
-                            borderRadius: 24,
+                            height: PRIMARY_ACTION_HEIGHT,
+                            borderRadius: PRIMARY_ACTION_RADIUS,
                             alignItems: 'center',
                             justifyContent: 'center',
                             backgroundColor: isDark ? '#B2C4AA' : '#5D6D54',
+                            opacity: isSaving ? 0.7 : 1,
                             shadowColor: isDark ? '#B2C4AA' : '#5D6D54',
-                            shadowOffset: { width: 0, height: 6 },
-                            shadowOpacity: 0.25,
-                            shadowRadius: 12,
-                            elevation: 6,
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowOpacity: 0.18,
+                            shadowRadius: 10,
+                            elevation: 5,
                         }}
                     >
-                        <Text className={`font-black text-base tracking-[3px] uppercase ${isDark ? 'text-[#1A1C18]' : 'text-white'}`}>
-                            {activityId ? 'UPDATE ACTIVITY' : 'CREATE ACTIVITY'}
-                        </Text>
+                        {isSaving ? (
+                            <ActivityIndicator color={isDark ? '#1A1C18' : '#FFFFFF'} size="small" />
+                        ) : (
+                            <Text
+                                style={{
+                                    fontWeight: '900',
+                                    fontSize: PRIMARY_ACTION_TEXT_SIZE,
+                                    letterSpacing: 2,
+                                    textTransform: 'uppercase',
+                                    color: isDark ? '#1A1C18' : '#FFFFFF',
+                                }}
+                            >
+                                {activityId ? 'UPDATE ACTIVITY' : 'CREATE ACTIVITY'}
+                            </Text>
+                        )}
                     </RippleButton>
                 </ScrollView>
             </KeyboardAvoidingView>
+
+            <BottomFade visible={showBottomFade} height={190} />
 
             {/* Modals */}
 

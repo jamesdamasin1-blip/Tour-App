@@ -30,12 +30,12 @@ export function PressableScale({
     const handlePressIn = useCallback((e: any) => {
         scale.value = withSpring(activeScale, PRESS_SPRING);
         onPressIn?.(e);
-    }, [activeScale, onPressIn]);
+    }, [activeScale, onPressIn, scale]);
 
     const handlePressOut = useCallback((e: any) => {
         scale.value = withSpring(1, PRESS_SPRING);
         onPressOut?.(e);
-    }, [onPressOut]);
+    }, [onPressOut, scale]);
 
     const animStyle = useAnimatedStyle(() => ({
         transform: [{ scale: scale.value }],

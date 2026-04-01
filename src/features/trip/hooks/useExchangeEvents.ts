@@ -12,16 +12,16 @@ export const useExchangeEvents = (tripId: string) => {
         allExchangeEvents.filter(e => e.tripId === tripId), 
     [allExchangeEvents, tripId]);
 
-    const addExchangeEvent = (data: Omit<ExchangeEvent, 'id' | 'tripId'>) => {
-        addExchangeEventAction({ ...data, tripId });
+    const addExchangeEvent = async (data: Omit<ExchangeEvent, 'id' | 'tripId'>) => {
+        await addExchangeEventAction({ ...data, tripId });
     };
 
-    const updateExchangeEvent = (id: string, data: Partial<Omit<ExchangeEvent, 'id' | 'tripId'>>) => {
-        updateExchangeEventAction(id, data);
+    const updateExchangeEvent = async (id: string, data: Partial<Omit<ExchangeEvent, 'id' | 'tripId'>>) => {
+        await updateExchangeEventAction(id, data);
     };
 
-    const deleteExchangeEvent = (id: string) => {
-        deleteExchangeEventAction(id);
+    const deleteExchangeEvent = async (id: string) => {
+        await deleteExchangeEventAction(id);
     };
 
     return {

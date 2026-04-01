@@ -1,195 +1,236 @@
 import { StateCreator } from 'zustand';
 import { TripPlan, Wallet, TripMember, BUDDY_COLORS } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
-import { offlineSync, validateImportedTrip, stampFieldUpdates } from '../storeHelpers';
+import { mapTripToDb } from '../../mappers/trip.mapper';
+import {
+    beginTripCloudMutation,
+    endTripCloudMutation,
+    fetchTripCloudBundle,
+    refreshTripCloudState,
+    refreshAccessibleCloudState,
+} from '../cloudSyncHelpers';
+import { syncTrace, summarizeTrip, summarizeWallets } from '../../sync/debug';
+import { persistLocalTripHide, stampFieldUpdates, supabase, validateImportedTrip } from '../storeHelpers';
 import type { AppState } from '../useStore';
+import {
+    applyTripWalletDerivedFields,
+    buildNewTripPlan,
+    normalizeImportedTripMembers,
+    normalizeTripWallet,
+    resolveCurrentAuthUserId,
+} from './tripSlice.helpers';
 
 export interface TripSlice {
     trips: TripPlan[];
-    addTrip: (trip: Omit<TripPlan, 'id' | 'isCompleted' | 'lastModified' | 'wallets'> & { id?: string, wallets: (Omit<Wallet, 'id' | 'tripId' | 'spentAmount'> & { id?: string })[] }, fromSync?: boolean) => string;
-    updateTrip: (id: string, trip: Partial<TripPlan>, fromSync?: boolean) => void;
-    deleteTrip: (id: string, fromSync?: boolean) => void;
-    toggleTripCompletion: (id: string, fromSync?: boolean) => void;
+    addTrip: (
+        trip: Omit<TripPlan, 'id' | 'isCompleted' | 'lastModified' | 'wallets'> & {
+            id?: string;
+            wallets: (Omit<Wallet, 'id' | 'tripId' | 'spentAmount'> & { id?: string })[];
+        }
+    ) => Promise<string>;
+    updateTrip: (id: string, trip: Partial<TripPlan>) => Promise<void>;
+    deleteTrip: (id: string) => Promise<void>;
+    toggleTripCompletion: (id: string) => Promise<void>;
     importTrip: (tripData: any) => void;
-    updateWalletBaseline: (tripId: string, walletId: string, rate: number, source: 'initial' | 'user', fromSync?: boolean) => void;
-    addMember: (tripId: string, name: string, opts?: { userId?: string; email?: string }, fromSync?: boolean) => TripMember | null;
-    removeMember: (tripId: string, memberId: string, fromSync?: boolean) => void;
-    updateMemberRole: (tripId: string, memberId: string, role: 'editor' | 'viewer', fromSync?: boolean) => void;
-    /** @deprecated Use addMember */
-    addBuddy: (tripId: string, name: string) => TripMember | null;
-    /** @deprecated Use removeMember */
-    removeBuddy: (tripId: string, buddyId: string) => void;
+    updateWalletBaseline: (
+        tripId: string,
+        walletId: string,
+        rate: number,
+        source: 'initial' | 'user'
+    ) => Promise<void>;
+    addMember: (tripId: string, name: string, opts?: { userId?: string; email?: string }) => Promise<TripMember | null>;
+    removeMember: (tripId: string, memberId: string) => Promise<void>;
+    updateMemberRole: (tripId: string, memberId: string, role: 'editor' | 'viewer') => Promise<void>;
+    addBuddy: (tripId: string, name: string) => Promise<TripMember | null>;
+    removeBuddy: (tripId: string, buddyId: string) => Promise<void>;
 }
 
-export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, _get) => ({
+export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (_set, get) => ({
     trips: [],
 
-    addTrip: (tripData, fromSync) => {
+    addTrip: async (tripData) => {
         const id = tripData.id || generateId();
         const lastModified = Date.now();
+        const authUserId = await resolveCurrentAuthUserId(get().currentUserId);
+        if (!authUserId) throw new Error('Not authenticated');
+        const { getAuthState } = await import('../../auth/googleAuth');
+        const authState = await getAuthState();
+        beginTripCloudMutation(id);
 
-        const wallets: Wallet[] = tripData.wallets.map(w => ({
-            ...w,
-            id: w.id || generateId(),
-            tripId: id,
-            spentAmount: 0,
-            version: 1,
-            createdAt: Date.now(),
-            deletedAt: null,
-            fieldUpdates: {},
-        }));
-        wallets.forEach(w => w.fieldUpdates = stampFieldUpdates({}, w));
+        try {
+            const wallets: Wallet[] = tripData.wallets.map(wallet => normalizeTripWallet(id, wallet));
+            const newTrip = buildNewTripPlan(tripData, id, wallets, lastModified, authUserId, {
+                displayName: authState.displayName,
+                email: authState.email,
+            });
+            syncTrace('TripMutation', 'submit_add_trip', {
+                tripId: id,
+                authUserId,
+                trip: summarizeTrip(newTrip),
+                wallets: summarizeWallets(wallets),
+            });
 
-        const newTrip: TripPlan = {
-            ...tripData,
-            id,
-            wallets,
-            isCompleted: false,
-            lastModified,
-            tripCurrency: wallets[0]?.currency || tripData.homeCurrency,
-            totalBudgetTrip: wallets[0]?.totalBudget || 0,
-            totalBudget: wallets.reduce((acc, w) => acc + (w.totalBudget / (w.defaultRate || 1)), 0),
-            currency: wallets[0]?.currency || tripData.homeCurrency,
-            version: 1,
-            deletedAt: null,
-        } as TripPlan;
-        newTrip.fieldUpdates = stampFieldUpdates({}, newTrip);
+            const { error } = await supabase.rpc('create_trip_bundle', {
+                p_trip: newTrip,
+                p_wallets: wallets,
+            });
+            if (error) throw error;
+            syncTrace('TripMutation', 'rpc_add_trip_success', { tripId: id });
 
-        set((state) => ({
-            trips: [...state.trips, newTrip]
-        }));
-
-        if (!fromSync) {
-            offlineSync.trip(newTrip);
-            wallets.forEach(w => offlineSync.wallet(w));
+            await refreshTripCloudState(id);
+            syncTrace('TripMutation', 'refresh_after_add_trip_done', { tripId: id });
+            return id;
+        } catch (error: any) {
+            syncTrace('TripMutation', 'add_trip_failed', {
+                tripId: id,
+                message: error?.message,
+                code: error?.code,
+            });
+            throw error;
+        } finally {
+            endTripCloudMutation(id);
         }
-
-        return id;
     },
 
-    updateTrip: (id, tripData, fromSync) =>
-        set((state) => {
+    updateTrip: async (id, tripData) => {
+        beginTripCloudMutation(id);
+        try {
+            const bundle = await fetchTripCloudBundle(id);
+            if (!bundle) return;
+
             const lastModified = Date.now();
-            const updated = state.trips.map(t => {
-                if (t.id === id) {
-                    const result = { ...t, ...tripData, lastModified };
-                    result.fieldUpdates = stampFieldUpdates(t.fieldUpdates, tripData, lastModified);
-                    return result;
+            const nextTrip: TripPlan = {
+                ...bundle.trip,
+                ...tripData,
+                lastModified,
+            };
+            nextTrip.fieldUpdates = stampFieldUpdates(bundle.trip.fieldUpdates, tripData as Record<string, unknown>, lastModified);
+
+            let nextWallets = bundle.wallets;
+            let removedWalletIds: string[] = [];
+
+            if (tripData.wallets) {
+                const nextWalletIds = new Set(tripData.wallets.map(wallet => wallet.id));
+                removedWalletIds = bundle.wallets
+                    .filter(wallet => !nextWalletIds.has(wallet.id))
+                    .map(wallet => wallet.id);
+
+                const blockedRemoval = bundle.expenses.some(expense => removedWalletIds.includes(expense.walletId));
+                if (blockedRemoval) {
+                    throw new Error('Cannot remove a wallet that already has expenses.');
                 }
-                return t;
-            });
-            const trip = updated.find(t => t.id === id);
-            if (trip && !fromSync) offlineSync.tripUpdate(id, trip);
-            return { trips: updated };
-        }),
 
-    deleteTrip: (id, fromSync) =>
-        set((state) => {
-            const trip = state.trips.find(t => t.id === id);
-            if (!trip) return state;
+                nextWallets = tripData.wallets.map(wallet =>
+                    normalizeTripWallet(id, wallet as Wallet, bundle.wallets.find(existing => existing.id === wallet.id))
+                );
 
-            if (!fromSync) {
-                // Determine if we're a member leaving or just hiding an owned trip
-                const isCreator = !trip.isCloudSynced || (state as any).userId === (trip as any).user_id;
-
-                if (!isCreator && trip.id) {
-                    // MEMBER LEAVING: Sync removal to server then hide locally
-                    const currentUserId = (state as any).userId;
-                    const updatedMembers = (trip.members || []).filter(m => m.userId !== currentUserId);
-                    const lastModified = Date.now();
-                    const updatedTrip = { 
-                        ...trip, 
-                        members: updatedMembers, 
-                        lastModified,
-                        fieldUpdates: stampFieldUpdates(trip.fieldUpdates, { members: updatedMembers }, lastModified)
-                    };
-                    
-                    // Push the member removal to server
-                    offlineSync.tripUpdate(id, updatedTrip);
-                    // Mark hidden locally in SQLite
-                    offlineSync.tripHide(id, updatedTrip);
-                } else {
-                    // CREATOR/OWNER HIDING: Just mark hidden locally in SQLite (never syncs)
-                    offlineSync.tripHide(id, trip);
-                }
+                Object.assign(nextTrip, applyTripWalletDerivedFields(nextTrip, nextWallets));
             }
 
-            // Remove from local UI immediately
-            return {
-                trips: state.trips.filter(t => t.id !== id),
-                activities: state.activities.filter(a => a.tripId !== id),
-                expenses: state.expenses.filter(e => e.tripId !== id),
-            };
-        }),
+            const { error } = await supabase.rpc('update_trip_bundle', {
+                p_trip_id: id,
+                p_trip: nextTrip,
+                p_wallets: tripData.wallets ? nextWallets : null,
+                p_removed_wallet_ids: removedWalletIds,
+            });
+            if (error) throw error;
 
-    toggleTripCompletion: (id, fromSync) =>
-        set((state) => {
-            const trip = state.trips.find(t => t.id === id);
-            if (!trip) return state;
+            await refreshAccessibleCloudState();
+        } finally {
+            endTripCloudMutation(id);
+        }
+    },
 
-            const lastModified = Date.now();
-            const isCompleted = !trip.isCompleted;
-            const fieldUpdates = stampFieldUpdates(trip.fieldUpdates, { isCompleted }, lastModified);
+    deleteTrip: async (id) => {
+        const localTrip = get().trips.find(trip => trip.id === id);
+        if (!localTrip) return;
 
-            const updatedTrip = { ...trip, isCompleted, lastModified, fieldUpdates };
+        const currentUserId = await resolveCurrentAuthUserId(get().currentUserId);
+        const ownerUserId = (localTrip as any).userId;
+        const isCreator = !localTrip.isCloudSynced || (!!currentUserId && ownerUserId === currentUserId);
+        const lastModified = Date.now();
 
-            if (!fromSync) offlineSync.tripUpdate(id, updatedTrip);
+        if (isCreator) {
+            const { error } = await supabase.rpc('soft_delete_trip', {
+                p_trip_id: id,
+                p_user_id: currentUserId,
+            });
+            if (error) throw error;
 
-            return {
-                trips: state.trips.map(t => t.id === id ? updatedTrip : t)
-            };
-        }),
+            await refreshAccessibleCloudState();
+            return;
+        }
+
+        const { error } = await supabase.rpc('leave_trip', {
+            p_trip_id: id,
+        });
+        if (error) throw error;
+
+        persistLocalTripHide(id, {
+            ...localTrip,
+            members: (localTrip.members || []).filter(member => member.userId !== currentUserId),
+            lastModified,
+        });
+        await refreshTripCloudState(id);
+    },
+
+    toggleTripCompletion: async (id) => {
+        const bundle = await fetchTripCloudBundle(id);
+        if (!bundle) return;
+
+        const lastModified = Date.now();
+        const isCompleted = !bundle.trip.isCompleted;
+        const fieldUpdates = stampFieldUpdates(bundle.trip.fieldUpdates, { isCompleted }, lastModified);
+
+        const { error } = await supabase
+            .from('trips')
+            .update({
+                ...mapTripToDb({ ...bundle.trip, isCompleted, lastModified, fieldUpdates }),
+                updated_at: lastModified,
+            })
+            .eq('id', id);
+        if (error) throw error;
+
+        await refreshAccessibleCloudState();
+    },
 
     importTrip: (tripData: any) =>
-        set((state) => {
+        _set((state) => {
             if (!validateImportedTrip(tripData)) {
-                console.error('[importTrip] Invalid trip data — schema validation failed');
+                console.error('[importTrip] Invalid trip data - schema validation failed');
                 return state;
             }
 
-            const existingTrip = state.trips.find(t => t.id === tripData.id);
-
+            const existingTrip = state.trips.find(trip => trip.id === tripData.id);
             if (existingTrip && existingTrip.lastModified >= tripData.lastModified) {
                 return state;
             }
 
-            const newActivities = (tripData.activities || []).map((a: any) => ({ ...a }));
-            const { activities: _stripped, ...cleanTrip } = tripData;
-
-            // Only enqueue sync pushes for LOCAL trips. Cloud-synced trips (from QR/code
-            // invites) already exist on the server — pushing them would overwrite the
-            // creator's data with the joiner's user_id and stale snapshot.
-            const isCloudImport = tripData.isCloudSynced === true;
-            if (!isCloudImport) {
-                if (existingTrip) {
-                    offlineSync.tripUpdate(tripData.id, cleanTrip);
-                } else {
-                    offlineSync.trip(cleanTrip);
-                }
-                newActivities.forEach((a: any) => offlineSync.activity(a));
-            }
-
-            // Extract embedded expenses from activities into the top-level expenses
-            // array so they're available for broadcasting and expense-based calculations.
+            const newActivities = (tripData.activities || []).map((activity: any) => ({ ...activity }));
+            const { activities: _ignoredActivities, ...rawTrip } = tripData;
+            const cleanTrip = {
+                ...rawTrip,
+                members: normalizeImportedTripMembers(rawTrip.members),
+            };
             const embeddedExpenses: any[] = [];
-            for (const a of newActivities) {
-                if (a.expenses?.length) {
-                    for (const e of a.expenses) {
-                        embeddedExpenses.push({ ...e, tripId: a.tripId, activityId: a.id });
-                    }
+
+            for (const activity of newActivities) {
+                if (!activity.expenses?.length) continue;
+                for (const expense of activity.expenses) {
+                    embeddedExpenses.push({ ...expense, tripId: activity.tripId, activityId: activity.id });
                 }
             }
 
             if (existingTrip) {
                 return {
-                    trips: state.trips.map(t => t.id === tripData.id ? cleanTrip : t),
+                    trips: state.trips.map(trip => trip.id === tripData.id ? cleanTrip : trip),
                     activities: [
-                        ...state.activities.filter(a => a.tripId !== tripData.id),
-                        ...newActivities
+                        ...state.activities.filter(activity => activity.tripId !== tripData.id),
+                        ...newActivities,
                     ],
                     expenses: [
-                        ...state.expenses.filter(e => e.tripId !== tripData.id),
-                        ...embeddedExpenses
+                        ...state.expenses.filter(expense => expense.tripId !== tripData.id),
+                        ...embeddedExpenses,
                     ],
                 };
             }
@@ -201,134 +242,103 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (set, 
             };
         }),
 
-    addMember: (tripId, name, opts, fromSync) => {
-        let newMember: TripMember | null = null;
-        set((state) => {
-            const trip = state.trips.find(t => t.id === tripId);
-            if (!trip) return state;
-
-            const existing = trip.members || [];
-            const usedColors = existing.map(m => m.color);
-            const availableColor = BUDDY_COLORS.find(c => !usedColors.includes(c)) || BUDDY_COLORS[existing.length % BUDDY_COLORS.length];
-
-            // If no members yet, auto-add creator as first member
-            let members = [...existing];
-            if (members.length === 0) {
-                const creatorColor = BUDDY_COLORS.find(c => c !== availableColor) || BUDDY_COLORS[0];
-                members.push({
-                    id: generateId(),
-                    name: 'Me',
-                    color: creatorColor,
-                    isCreator: true,
-                    addedAt: Date.now() - 1,
-                });
-            }
-
-            newMember = {
-                id: generateId(),
-                name: name.trim(),
-                color: availableColor,
-                role: 'editor',
-                userId: opts?.userId,
-                email: opts?.email,
-                addedAt: Date.now(),
-            };
-            members.push(newMember);
+    updateWalletBaseline: async (tripId, walletId, rate, source) => {
+        beginTripCloudMutation(tripId);
+        try {
+            const bundle = await fetchTripCloudBundle(tripId);
+            if (!bundle) return;
 
             const lastModified = Date.now();
-            const updated = state.trips.map(t => {
-                if (t.id === tripId) {
-                    return { ...t, members, lastModified, fieldUpdates: stampFieldUpdates(t.fieldUpdates, { members }, lastModified) };
-                }
-                return t;
+            const nextWallets = bundle.wallets.map(wallet => {
+                if (wallet.id !== walletId) return wallet;
+                return {
+                    ...wallet,
+                    baselineExchangeRate: rate,
+                    baselineSource: source,
+                    lastModified,
+                    fieldUpdates: stampFieldUpdates(
+                        wallet.fieldUpdates,
+                        { baselineExchangeRate: rate, baselineSource: source },
+                        lastModified
+                    ),
+                };
             });
-            const trip2 = updated.find(t => t.id === tripId);
-            if (trip2 && !fromSync) offlineSync.tripUpdate(tripId, trip2);
-            return { trips: updated };
+
+            const updatedTrip = {
+                ...bundle.trip,
+                wallets: nextWallets,
+                lastModified,
+            };
+            updatedTrip.fieldUpdates = stampFieldUpdates(bundle.trip.fieldUpdates, { wallets: nextWallets }, lastModified);
+
+            const { error } = await supabase.rpc('update_trip_bundle', {
+                p_trip_id: tripId,
+                p_trip: updatedTrip,
+                p_wallets: nextWallets,
+                p_removed_wallet_ids: [],
+            });
+            if (error) throw error;
+            await refreshTripCloudState(tripId);
+        } finally {
+            endTripCloudMutation(tripId);
+        }
+    },
+
+    addMember: async (tripId, name, opts) => {
+        const localTrip = get().trips.find(trip => trip.id === tripId);
+        const bundle = localTrip ? null : await fetchTripCloudBundle(tripId);
+        const existing = (localTrip?.members || bundle?.trip.members || []);
+        const usedColors = existing.map(member => member.color);
+        const availableColor = BUDDY_COLORS.find(color => !usedColors.includes(color))
+            || BUDDY_COLORS[existing.length % BUDDY_COLORS.length];
+
+        const newMember: TripMember = {
+            id: generateId(),
+            name: name.trim(),
+            color: availableColor,
+            role: 'editor',
+            userId: opts?.userId,
+            email: opts?.email,
+            addedAt: Date.now(),
+        };
+        const { error } = await supabase.rpc('add_trip_member', {
+            p_trip_id: tripId,
+            p_member: newMember,
         });
+        if (error) throw error;
+
+        await refreshTripCloudState(tripId);
         return newMember;
     },
 
-    removeMember: (tripId, memberId, fromSync) =>
-        set((state) => {
-            const trip = state.trips.find(t => t.id === tripId);
-            if (!trip) return state;
-            const removedMember = (trip.members || []).find(m => m.id === memberId);
-            // Mark member as removed (keep entry so their userId can be checked on their device)
-            const members = (trip.members || []).map(m =>
-                m.id === memberId ? { ...m, removed: true } : m
-            );
-            // Track removed userId for sync blocking
-            const removedUserId = removedMember?.userId;
-            const removedMemberUserIds = [
-                ...((trip as any).removedMemberUserIds || []),
-                ...(removedUserId ? [removedUserId] : []),
-            ].filter((v, i, a) => a.indexOf(v) === i); // dedupe
-            const lastModified = Date.now();
-            const updated = state.trips.map(t => {
-                if (t.id === tripId) {
-                    return { ...t, members, removedMemberUserIds, lastModified, fieldUpdates: stampFieldUpdates(t.fieldUpdates, { members }, lastModified) };
-                }
-                return t;
-            });
-            const trip2 = updated.find(t => t.id === tripId);
-            if (trip2 && !fromSync) offlineSync.tripUpdate(tripId, trip2);
-            return { trips: updated };
-        }),
+    removeMember: async (tripId, memberId) => {
+        const { error } = await supabase.rpc('remove_trip_member', {
+            p_trip_id: tripId,
+            p_member_id: memberId,
+        });
+        if (error) throw error;
 
-    updateMemberRole: (tripId, memberId, role, fromSync) =>
-        set((state) => {
-            const trip = state.trips.find(t => t.id === tripId);
-            if (!trip) return state;
-            const members = (trip.members || []).map(m =>
-                m.id === memberId ? { ...m, role } : m
-            );
-            const lastModified = Date.now();
-            const updated = state.trips.map(t => {
-                if (t.id === tripId) {
-                    return { ...t, members, lastModified, fieldUpdates: stampFieldUpdates(t.fieldUpdates, { members }, lastModified) };
-                }
-                return t;
-            });
-            const trip2 = updated.find(t => t.id === tripId);
-            if (trip2 && !fromSync) offlineSync.tripUpdate(tripId, trip2);
-            return { trips: updated };
-        }),
+        await refreshTripCloudState(tripId);
+    },
 
-    // Deprecated aliases
-    addBuddy: (tripId, name) => {
-        const self = _get();
+    updateMemberRole: async (tripId, memberId, role) => {
+        const { error } = await supabase.rpc('update_trip_member_role', {
+            p_trip_id: tripId,
+            p_member_id: memberId,
+            p_role: role,
+        });
+        if (error) throw error;
+
+        await refreshTripCloudState(tripId);
+    },
+
+    addBuddy: async (tripId, name) => {
+        const self = get();
         return self.addMember(tripId, name);
     },
-    removeBuddy: (tripId, buddyId) => {
-        const self = _get();
-        self.removeMember(tripId, buddyId);
-    },
 
-    updateWalletBaseline: (tripId, walletId, rate, source, fromSync) =>
-        set((state) => {
-            const lastModified = Date.now();
-            const trips = state.trips.map(t => {
-                if (t.id === tripId) {
-                    const updated = {
-                        ...t,
-                        lastModified,
-                        wallets: (t.wallets || []).map(w => {
-                            if (w.id === walletId) {
-                                const newW = { ...w, baselineExchangeRate: rate, baselineSource: source };
-                                newW.fieldUpdates = stampFieldUpdates(w.fieldUpdates, { baselineExchangeRate: rate, baselineSource: source }, lastModified);
-                                if (!fromSync) offlineSync.walletUpdate(walletId, newW);
-                                return newW;
-                            }
-                            return w;
-                        })
-                    };
-                    updated.fieldUpdates = stampFieldUpdates(t.fieldUpdates, { wallets: updated.wallets }, lastModified);
-                    if (!fromSync) offlineSync.tripUpdate(tripId, updated);
-                    return updated;
-                }
-                return t;
-            });
-            return { trips };
-        }),
+    removeBuddy: async (tripId, buddyId) => {
+        const self = get();
+        await self.removeMember(tripId, buddyId);
+    },
 });

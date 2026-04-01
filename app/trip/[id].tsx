@@ -1,44 +1,39 @@
-import { ConfirmationModal } from '@/components/ConfirmationModal';
-import { SpontaneousExpenseModal } from '@/components/SpontaneousExpenseModal';
-import { GlassView } from '@/components/GlassView';
-import { Header } from '@/components/Header';
-import { ProgressBar } from '@/components/ProgressBar';
-import { MeshBackground } from '@/components/MeshBackground';
-import { TabBg } from '@/components/TabBg';
 import { ActivitiesSection } from '@/components/Activities/ActivitiesSection';
+import { ConfirmationModal } from '@/components/ConfirmationModal';
+import { ManageMembersModal } from '@/components/ManageBuddiesModal';
+import { MeshBackground } from '@/components/MeshBackground';
+import { SpontaneousExpenseFormData, SpontaneousExpenseModal } from '@/components/SpontaneousExpenseModal';
+import { usePermissions } from '@/src/hooks/usePermissions';
+import { useRealtimeSync } from '@/src/hooks/useRealtimeSync';
+import { syncTrace } from '@/src/sync/debug';
+import { AddExchangeModal } from '@/src/features/trip/components/AddExchangeModal';
+import { ExchangeHistoryModal } from '@/src/features/trip/components/ExchangeHistoryModal';
+import { TripChoiceModal } from '@/src/features/trip/components/TripChoiceModal';
+import { TripDateNavigator } from '@/src/features/trip/components/TripDateNavigator';
+import { TripDeleteRequestsPanel } from '@/src/features/trip/components/TripDeleteRequestsPanel';
+import { TripDetailFooter } from '@/src/features/trip/components/TripDetailFooter';
+import { TripDetailHeader } from '@/src/features/trip/components/TripDetailHeader';
+import { TripOverviewCard } from '@/src/features/trip/components/TripOverviewCard';
+import { useTripWallet } from '@/src/features/trip/hooks/useTripWallet';
 import { useStore } from '@/src/store/useStore';
 import { Activity } from '@/src/types/models';
 import { Calculations as MathUtils } from '@/src/utils/mathUtils';
 import { Feather } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import Animated, { runOnJS } from 'react-native-reanimated';
-import { TripWalletCard } from '@/src/features/trip/components/TripWalletCard'; // Keep for now in case of issues
-import { AddExchangeModal } from '@/src/features/trip/components/AddExchangeModal';
-import { ExchangeHistoryModal } from '@/src/features/trip/components/ExchangeHistoryModal';
-import { useTripWallet } from '@/src/features/trip/hooks/useTripWallet';
 import { StatusBar } from 'expo-status-bar';
-import { BottomFade } from '@/components/BottomFade';
-import { ManageMembersModal } from '@/components/ManageBuddiesModal';
-import { usePermissions } from '@/src/hooks/usePermissions';
-
-import { useRealtimeSync } from '@/src/hooks/useRealtimeSync';
-import { useMountEffect } from '@/src/hooks/useMountEffect';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TripDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
-    const trips = useStore(state => state.trips);
     const activities = useStore(state => state.activities);
     const deleteActivity = useStore(state => state.deleteActivity);
     const toggleActivityCompletion = useStore(state => state.toggleActivityCompletion);
-    const { subscribeToTrip, sendDeleteRequest, sendDeleteRequestCancelled } = useRealtimeSync();
-    const { theme, toggleTheme } = useStore();
+    const updateActivity = useStore(state => state.updateActivity);
+    const { sendDeleteRequest, sendDeleteRequestCancelled } = useRealtimeSync();
+    const { theme } = useStore();
+    const tripMutationCounts = useStore(state => state.tripMutationCounts);
     const deletionRequests = useStore(state => state.deletionRequests);
     const removeDeletionRequest = useStore(state => state.removeDeletionRequest);
     const isDark = theme === 'dark';
@@ -47,177 +42,145 @@ export default function TripDetailScreen() {
 
     const [deletingActivity, setDeletingActivity] = useState<Activity | null>(null);
     const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
+    const [editingSpontaneousActivity, setEditingSpontaneousActivity] = useState<Activity | null>(null);
     const [isSpontaneousModalVisible, setIsSpontaneousModalVisible] = useState(false);
     const [isChoiceModalVisible, setIsChoiceModalVisible] = useState(false);
     const [isAddExchangeVisible, setIsAddExchangeVisible] = useState(false);
     const [isExchangeHistoryVisible, setIsExchangeHistoryVisible] = useState(false);
     const [isBuddiesVisible, setIsBuddiesVisible] = useState(false);
-    const [isScannerVisible, setIsScannerVisible] = useState(false);
-    const [isFullSummaryOpen, setIsFullSummaryOpen] = useState(false);
     const [selectedDateIndex, setSelectedDateIndex] = useState(0);
     const [showDeletePanel, setShowDeletePanel] = useState(false);
+    const [budgetDisplayHome, setBudgetDisplayHome] = useState(true);
+    const [selectedBalanceIndex, setSelectedBalanceIndex] = useState(0);
+
     const lastPressTime = useRef<number | null>(null);
     const listRef = useRef<ScrollView>(null);
 
-    const { 
-        trip, 
-        walletsStats, 
-        totalWalletBalanceHome, 
-        totalWalletBalanceTrip,
-        homeCurrency 
+    const {
+        trip,
+        walletsStats,
+        totalWalletBalanceHome,
+        homeCurrency,
     } = useTripWallet(id as string);
-    
-    const [selectedBalanceIndex, setSelectedBalanceIndex] = useState(0); // 0: Total Home, 1+: Specific Wallet Trip
+
+    const isTripFinancialSyncing = !!tripMutationCounts[id as string];
     const toggleBalanceMode = useCallback(() => {
+        if (isTripFinancialSyncing) return;
         const statsCount = walletsStats?.length || 0;
         setSelectedBalanceIndex(prev => (prev + 1) % (statsCount + 1));
-    }, [walletsStats?.length]);
+    }, [isTripFinancialSyncing, walletsStats?.length]);
 
     const balanceFormatted = useMemo(() => {
         if (!trip) return '...';
-        
+
         try {
             if (selectedBalanceIndex === 0 || !walletsStats || walletsStats.length === 0) {
                 return MathUtils.formatCurrency(totalWalletBalanceHome || 0, homeCurrency);
-            } else {
-                const wallet = walletsStats[selectedBalanceIndex - 1];
-                if (!wallet) return MathUtils.formatCurrency(totalWalletBalanceHome || 0, homeCurrency);
-                return MathUtils.formatCurrency(wallet.balance, wallet.currency);
             }
-        } catch (e) {
-            console.error('Error formatting balance:', e);
+
+            const wallet = walletsStats[selectedBalanceIndex - 1];
+            if (!wallet) {
+                return MathUtils.formatCurrency(totalWalletBalanceHome || 0, homeCurrency);
+            }
+
+            return MathUtils.formatCurrency(wallet.balance, wallet.currency);
+        } catch (error) {
+            console.error('Error formatting balance:', error);
             return 'Balance Error';
         }
-    }, [totalWalletBalanceHome, homeCurrency, trip, selectedBalanceIndex, walletsStats]);
+    }, [homeCurrency, selectedBalanceIndex, totalWalletBalanceHome, trip, walletsStats]);
 
     const balanceDetail = useMemo(() => {
         if (!trip || !walletsStats || walletsStats.length === 0) return undefined;
-        
+
         try {
             if (selectedBalanceIndex === 0) {
-                // Global View: Show context about count
-                return walletsStats.length > 1 
-                    ? `${walletsStats.length} MULTI-CURRENCY WALLETS` 
+                return walletsStats.length > 1
+                    ? `${walletsStats.length} MULTI-CURRENCY WALLETS`
                     : `COMBINED TOTAL IN ${homeCurrency}`;
-            } else {
-                // Wallet View: Show Equivalent in Home Currency to prevent currency shock
-                const wallet = walletsStats[selectedBalanceIndex - 1];
-                if (!wallet) return undefined;
-                return `EQUIVALENT TO ${MathUtils.formatCurrency(wallet.homeEquivalent, homeCurrency)}`;
             }
-        } catch (e) {
+
+            const wallet = walletsStats[selectedBalanceIndex - 1];
+            if (!wallet) return undefined;
+
+            return `EQUIVALENT TO ${MathUtils.formatCurrency(wallet.homeEquivalent, homeCurrency)}`;
+        } catch {
             return undefined;
         }
-    }, [trip, walletsStats, homeCurrency, selectedBalanceIndex]);
+    }, [homeCurrency, selectedBalanceIndex, trip, walletsStats]);
 
-    const tripActivities = useMemo(() => activities.filter(a => a.tripId === id), [activities, id]);
-
-    const totalSpent = useMemo(() => MathUtils.getTotalTripSpent(tripActivities), [tripActivities]);
-    const totalBudget = useMemo(() => trip?.totalBudget || 0, [trip]);
-
-    const plannedActivities = useMemo(() => tripActivities.filter(a => !a.isSpontaneous), [tripActivities]);
-    const completedActivitiesCount = useMemo(() => plannedActivities.filter(a => a.isCompleted).length, [plannedActivities]);
+    const tripActivities = useMemo(() => activities.filter(activity => activity.tripId === id), [activities, id]);
+    const plannedActivities = useMemo(() => tripActivities.filter(activity => !activity.isSpontaneous), [tripActivities]);
+    const completedActivitiesCount = useMemo(() => plannedActivities.filter(activity => activity.isCompleted).length, [plannedActivities]);
     const overallProgress = plannedActivities.length > 0 ? (completedActivitiesCount / plannedActivities.length) * 100 : 0;
 
-    // Primary trip currency (first wallet's currency)
     const tripCurrency = useMemo(() => walletsStats[0]?.currency || '', [walletsStats]);
     const primaryRate = useMemo(() => walletsStats[0]?.effectiveRate || 1, [walletsStats]);
-
-    const [budgetDisplayHome, setBudgetDisplayHome] = useState(true);
     const toggleBudgetCurrency = useCallback(() => setBudgetDisplayHome(prev => !prev), []);
 
-    // Planned: sum of allotted budgets in home currency
     const plannedAllottedHome = useMemo(() => {
         return tripActivities
-            .filter(a => !a.isSpontaneous)
+            .filter(activity => !activity.isSpontaneous)
             .reduce((sum, activity) => {
                 const budget = activity.allocatedBudget || 0;
                 const budgetCurrency = activity.budgetCurrency || '';
                 if (budgetCurrency === homeCurrency) return sum + budget;
-                const wallet = trip?.wallets?.find(w => w.id === activity.walletId);
+
+                const wallet = trip?.wallets?.find(item => item.id === activity.walletId);
                 const rate = wallet?.baselineExchangeRate || wallet?.defaultRate || 1;
                 return sum + (budget * rate);
             }, 0);
-    }, [tripActivities, homeCurrency, trip]);
+    }, [homeCurrency, trip, tripActivities]);
 
-    // Spontaneous: actual spent in home currency
-    const spontaneousSpentHome = useMemo(() => {
-        return tripActivities
-            .filter(a => !!a.isSpontaneous)
-            .reduce((sum, a) => sum + (a.expenses || []).reduce((s, e) => s + (e.convertedAmountHome || 0), 0), 0);
-    }, [tripActivities]);
+    const totalCommittedHome = plannedAllottedHome;
 
-    // Total committed = planned budgets + historical spontaneous accumulation (never decreases)
-    const spontaneousAccumulated = useMemo(() => {
-        const events = trip?.spontaneousEvents || [];
-        return events.reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
-    }, [trip]);
-    const totalCommittedHome = plannedAllottedHome + spontaneousAccumulated;
-
-    // Total wallet budget (sum of all funding lots) in home currency
     const totalWalletBudgetHome = useMemo(() => {
         if (!trip?.wallets) return 0;
+
         return trip.wallets.reduce((sum, wallet) => {
             const lots = (wallet as any).lots || [];
-            return sum + lots.reduce((lSum: number, lot: any) => {
+            return sum + lots.reduce((lotSum: number, lot: any) => {
                 const amount = Number(lot.sourceAmount || 0);
                 if (lot.sourceCurrency === homeCurrency) {
-                    return lSum + amount;
+                    return lotSum + amount;
                 }
+
                 const rate = wallet.baselineExchangeRate || wallet.defaultRate || 1;
                 const converted = Number(lot.originalConvertedAmount || 0);
-                return lSum + (converted * rate);
+                return lotSum + (converted * rate);
             }, 0);
         }, 0);
-    }, [trip, homeCurrency]);
+    }, [homeCurrency, trip]);
 
-    // Trip currency equivalents (divide home by primary rate)
     const totalCommittedTrip = primaryRate > 0 ? totalCommittedHome / primaryRate : 0;
     const totalWalletBudgetTrip = primaryRate > 0 ? totalWalletBudgetHome / primaryRate : 0;
-
     const isOverBudget = totalCommittedHome > totalWalletBudgetHome;
 
     const { canEdit: isAdmin, isCreator, currentMember } = usePermissions(trip?.id || '');
 
-    // Pagination Logic: Group by date
     const activitiesByDate = useMemo(() => {
         const groups: { date: number; activities: Activity[] }[] = [];
         const sorted = [...tripActivities].sort((a, b) => a.date - b.date || a.time - b.time);
-        
+
         sorted.forEach(activity => {
             const dateStr = new Date(activity.date).toDateString();
-            const group = groups.find(g => new Date(g.date).toDateString() === dateStr);
+            const group = groups.find(item => new Date(item.date).toDateString() === dateStr);
             if (group) {
                 group.activities.push(activity);
             } else {
                 groups.push({ date: activity.date, activities: [activity] });
             }
         });
-        
+
         return groups.sort((a, b) => a.date - b.date);
     }, [tripActivities]);
 
     const safeDateIndex = Math.min(selectedDateIndex, Math.max(0, activitiesByDate.length - 1));
     const currentGroup = activitiesByDate[safeDateIndex] || null;
 
-    // Subscribe to realtime updates — harmless if trip isn't in Supabase yet
-    useMountEffect(() => {
-        const unsubscribe = subscribeToTrip(id as string);
-        return () => unsubscribe();
-    });
-
-    const tripDuration = useMemo(() => {
-        if (!trip) return '';
-        const start = new Date(trip.startDate);
-        const end = new Date(trip.endDate);
-        const startStr = start.toLocaleDateString([], { month: 'short', day: 'numeric' });
-        const endStr = end.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-        return `${startStr} - ${endStr}`;
-    }, [trip]);
-
     const handlePressActivity = useCallback((activity: Activity) => {
         const now = Date.now();
-        if (lastPressTime.current && (now - lastPressTime.current < 800)) {
+        if (lastPressTime.current && now - lastPressTime.current < 800) {
             return;
         }
         lastPressTime.current = now;
@@ -229,37 +192,42 @@ export default function TripDetailScreen() {
         } else {
             router.push(`/add-expense/${activity.id}` as any);
         }
-    }, [router, id]);
+    }, [id, router]);
 
     const handleEditActivity = useCallback((activity: Activity) => {
+        if (activity.isSpontaneous) {
+            setEditingSpontaneousActivity(activity);
+            setIsSpontaneousModalVisible(true);
+            return;
+        }
+
         setEditingActivity(activity);
     }, []);
 
     const confirmEditActivity = useCallback(() => {
-        if (editingActivity) {
-            const activityId = editingActivity.id;
-            setEditingActivity(null);
-            router.push(`/create-activity?tripId=${id}&activityId=${activityId}` as any);
-        }
-    }, [editingActivity, router, id]);
+        if (!editingActivity) return;
+
+        const activityId = editingActivity.id;
+        setEditingActivity(null);
+        router.push(`/create-activity?tripId=${id}&activityId=${activityId}` as any);
+    }, [editingActivity, id, router]);
 
     const handleDeleteActivity = useCallback((activity: Activity) => {
         setDeletingActivity(activity);
     }, []);
 
     const confirmDeleteActivity = useCallback(() => {
-        if (deletingActivity) {
-            deleteActivity(deletingActivity.id);
-            setDeletingActivity(null);
-        }
-    }, [deletingActivity, deleteActivity]);
+        if (!deletingActivity) return;
+        deleteActivity(deletingActivity.id);
+        setDeletingActivity(null);
+    }, [deleteActivity, deletingActivity]);
 
-    // Deletion requests for this trip (creator sees these)
-    const tripDeletionRequests = deletionRequests.filter(r => r.tripId === id);
+    const tripDeletionRequests = deletionRequests.filter(request => request.tripId === id);
 
     const handleRequestDelete = useCallback((activity: Activity) => {
         if (!currentMember) return;
-        const req = {
+
+        sendDeleteRequest({
             id: `${Date.now()}-${activity.id}`,
             tripId: id as string,
             activityId: activity.id,
@@ -268,82 +236,84 @@ export default function TripDetailScreen() {
             requestedByName: currentMember.name,
             requestedByColor: currentMember.color,
             requestedAt: Date.now(),
-        };
-        sendDeleteRequest(req);
+        });
     }, [currentMember, id, sendDeleteRequest]);
 
-    const handleApproveDelete = useCallback((req: typeof tripDeletionRequests[0]) => {
-        deleteActivity(req.activityId);
-        removeDeletionRequest(req.id);
-        sendDeleteRequestCancelled(req.tripId, req.id);
-        if (tripDeletionRequests.length <= 1) setShowDeletePanel(false);
+    const handleApproveDelete = useCallback((request: typeof tripDeletionRequests[0]) => {
+        deleteActivity(request.activityId);
+        removeDeletionRequest(request.id);
+        sendDeleteRequestCancelled(request.tripId, request.id);
+        if (tripDeletionRequests.length <= 1) {
+            setShowDeletePanel(false);
+        }
     }, [deleteActivity, removeDeletionRequest, sendDeleteRequestCancelled, tripDeletionRequests.length]);
 
-    const handleRejectDelete = useCallback((req: typeof tripDeletionRequests[0]) => {
-        removeDeletionRequest(req.id);
-        sendDeleteRequestCancelled(req.tripId, req.id);
-        if (tripDeletionRequests.length <= 1) setShowDeletePanel(false);
+    const handleRejectDelete = useCallback((request: typeof tripDeletionRequests[0]) => {
+        removeDeletionRequest(request.id);
+        sendDeleteRequestCancelled(request.tripId, request.id);
+        if (tripDeletionRequests.length <= 1) {
+            setShowDeletePanel(false);
+        }
     }, [removeDeletionRequest, sendDeleteRequestCancelled, tripDeletionRequests.length]);
 
     const logSpontaneousExpense = useStore(state => state.logSpontaneousExpense);
 
-    const handleLogSpontaneous = useCallback((data: any) => {
-        // Extract walletId from data and pass it as the second argument
-        const { walletId, ...expenseData } = data;
-        logSpontaneousExpense(id, walletId, expenseData);
-    }, [id, logSpontaneousExpense]);
-
-
-    const [showBottomFade, setShowBottomFade] = useState(false);
-
-    const handleScroll = useCallback((event: any) => {
-        const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-        const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 40;
-        const isScrollable = contentSize.height > layoutMeasurement.height;
-        setShowBottomFade(isScrollable && !isCloseToBottom);
+    const handleCloseSpontaneousModal = useCallback(() => {
+        setIsSpontaneousModalVisible(false);
+        setEditingSpontaneousActivity(null);
     }, []);
 
-    const renderHeader = useCallback(() => (
-            <Header
-                title={trip?.title?.toUpperCase() || ''}
-                showBack={true}
-                onBack={() => router.replace('/')}
-                showThemeToggle={false}
-                rightElement={
-                    <View style={{ flexDirection: 'row', gap: 10 }}>
-                        {isCreator && tripDeletionRequests.length > 0 && (
-                            <TouchableOpacity
-                                onPress={() => setShowDeletePanel(prev => !prev)}
-                                activeOpacity={0.75}
-                                style={{ position: 'relative' }}
-                            >
-                                <View style={{
-                                    width: 40, height: 40, borderRadius: 12,
-                                    backgroundColor: showDeletePanel
-                                        ? (isDark ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.25)')
-                                        : (isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.12)'),
-                                    borderWidth: 1, borderColor: isDark ? 'rgba(245,158,11,0.35)' : 'rgba(245,158,11,0.4)',
-                                    alignItems: 'center', justifyContent: 'center',
-                                }}>
-                                    <Feather name="alert-triangle" size={18} color="#F5A623" />
-                                </View>
-                                <View style={{
-                                    position: 'absolute', top: -4, right: -4,
-                                    minWidth: 16, height: 16, borderRadius: 8,
-                                    backgroundColor: '#ef4444',
-                                    alignItems: 'center', justifyContent: 'center',
-                                    paddingHorizontal: 3,
-                                }}>
-                                    <Text style={{ fontSize: 9, fontWeight: '900', color: '#fff' }}>
-                                        {tripDeletionRequests.length}
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
-                        )}
-                    </View>
-                }
-            />
-        ), [trip, router, isCreator, tripDeletionRequests, isDark, showDeletePanel]);
+    const handleLogSpontaneous = useCallback(async (data: SpontaneousExpenseFormData) => {
+        syncTrace('TripScreen', 'handle_log_spontaneous', {
+            tripId: id,
+            editingActivityId: editingSpontaneousActivity?.id ?? null,
+            data,
+        });
+        if (!editingSpontaneousActivity) {
+            const { walletId, ...expenseData } = data;
+            await logSpontaneousExpense(id, walletId, expenseData);
+            return;
+        }
+
+        const existingExpense = editingSpontaneousActivity.expenses?.[0];
+        const wallet = trip?.wallets?.find(item => item.id === data.walletId);
+        const walletCurrency = wallet?.currency || existingExpense?.currency || editingSpontaneousActivity.budgetCurrency;
+
+        await updateActivity(editingSpontaneousActivity.id, {
+            walletId: data.walletId,
+            title: data.title,
+            category: data.category,
+            date: data.date,
+            allocatedBudget: data.amount,
+            budgetCurrency: walletCurrency,
+            isCompleted: true,
+            isSpontaneous: true,
+            countries: editingSpontaneousActivity.countries || [],
+            lastModifiedBy: currentMember?.id || editingSpontaneousActivity.lastModifiedBy,
+            expenses: existingExpense ? [{
+                ...existingExpense,
+                walletId: data.walletId,
+                name: data.title,
+                amount: data.amount,
+                currency: walletCurrency,
+                convertedAmountHome: data.convertedAmountHome ?? existingExpense.convertedAmountHome,
+                convertedAmountTrip: data.convertedAmountTrip ?? existingExpense.convertedAmountTrip,
+                category: data.category,
+                date: data.date,
+                originalAmount: data.originalAmount,
+                originalCurrency: data.originalCurrency,
+                lastModifiedBy: currentMember?.id || existingExpense.lastModifiedBy,
+            }] : [],
+        });
+    }, [currentMember?.id, editingSpontaneousActivity, id, logSpontaneousExpense, trip?.wallets, updateActivity]);
+
+    const handleReturnHome = useCallback(() => {
+        if (router.canGoBack()) {
+            router.back();
+            return;
+        }
+        router.replace('/(tabs)' as any);
+    }, [router]);
 
     if (!trip) {
         return (
@@ -359,401 +329,114 @@ export default function TripDetailScreen() {
     return (
         <MeshBackground style={{ flex: 1 }}>
             <StatusBar style={isDark ? 'light' : 'dark'} />
-            
-            {renderHeader()}
 
-            {/* Delete request dropdown — floats below header, only visible when panel is open */}
-            {isCreator && showDeletePanel && tripDeletionRequests.length > 0 && (
-                <>
-                    {/* Backdrop to dismiss panel */}
-                    <TouchableOpacity
-                        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }}
-                        activeOpacity={1}
-                        onPress={() => setShowDeletePanel(false)}
-                    />
-                    <View style={{
-                        position: 'absolute', top: insets.top + 60, right: 16, zIndex: 100,
-                        width: 280,
-                        backgroundColor: isDark ? '#1A2019' : '#FFFFFF',
-                        borderRadius: 18,
-                        borderWidth: 1, borderColor: isDark ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.35)',
-                        shadowColor: '#000', shadowOffset: { width: 0, height: 6 },
-                        shadowOpacity: 0.18, shadowRadius: 16, elevation: 12,
-                        overflow: 'hidden',
-                    }}>
-                        <View style={{
-                            flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10,
-                            borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.2)',
-                        }}>
-                            <Feather name="alert-triangle" size={12} color="#F5A623" style={{ marginRight: 6 }} />
-                            <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 1.5, color: '#F5A623', textTransform: 'uppercase' }}>
-                                DELETION REQUESTS
-                            </Text>
-                        </View>
-                        {tripDeletionRequests.map((req, index) => (
-                            <View key={req.id} style={{
-                                padding: 14,
-                                borderBottomWidth: index < tripDeletionRequests.length - 1 ? 1 : 0,
-                                borderBottomColor: isDark ? 'rgba(158,178,148,0.1)' : 'rgba(0,0,0,0.06)',
-                            }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                                    <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: req.requestedByColor, marginRight: 7 }} />
-                                    <Text style={{ fontSize: 9, fontWeight: '900', letterSpacing: 0.5, color: isDark ? '#F5A623' : '#B45309', flex: 1 }}>
-                                        {req.requestedByName.toUpperCase()}
-                                    </Text>
-                                </View>
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#F2F0E8' : '#111827', marginBottom: 10 }} numberOfLines={1}>
-                                    "{req.activityTitle}"
-                                </Text>
-                                <View style={{ flexDirection: 'row', gap: 8 }}>
-                                    <TouchableOpacity
-                                        onPress={() => handleRejectDelete(req)}
-                                        style={{ flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(0,0,0,0.1)' }}
-                                    >
-                                        <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: isDark ? '#9EB294' : '#6B7280' }}>DENY</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        onPress={() => handleApproveDelete(req)}
-                                        style={{ flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center', backgroundColor: '#ef4444' }}
-                                    >
-                                        <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 0.5, color: '#fff' }}>APPROVE</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        ))}
-                    </View>
-                </>
-            )}
+            <TripDetailHeader
+                title={trip.title?.toUpperCase() || ''}
+                isCreator={isCreator}
+                isDark={isDark}
+                requestCount={tripDeletionRequests.length}
+                showDeletePanel={showDeletePanel}
+                onBack={handleReturnHome}
+                onToggleDeletePanel={() => setShowDeletePanel(prev => !prev)}
+            />
+
+            <TripDeleteRequestsPanel
+                insetsTop={insets.top}
+                isCreator={isCreator}
+                isDark={isDark}
+                requests={tripDeletionRequests}
+                visible={showDeletePanel}
+                onApprove={handleApproveDelete}
+                onDismiss={() => setShowDeletePanel(false)}
+                onReject={handleRejectDelete}
+            />
 
             <ScrollView
                 ref={listRef as any}
                 showsVerticalScrollIndicator={false}
-                onScroll={handleScroll}
-                scrollEventThrottle={16}
                 contentContainerStyle={{ paddingBottom: 150 }}
                 className="flex-1"
             >
-                {/* Stats card */}
-                <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
-                    <GlassView
-                        intensity={isDark ? 50 : 80}
-                        borderRadius={24}
-                        borderColor={isDark ? "rgba(158, 178, 148, 0.1)" : "rgba(255, 255, 255, 0.4)"}
-                        backgroundColor={isDark ? "rgba(40, 44, 38, 0.6)" : "rgba(255, 255, 255, 0.6)"}
-                        style={{
-                            overflow: 'hidden',
-                            shadowColor: '#000',
-                            shadowOffset: { width: 0, height: 4 },
-                            shadowOpacity: isDark ? 0.08 : 0.04,
-                            shadowRadius: 10,
-                            elevation: 4,
-                        }}
-                    >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 18 }}>
-                            {/* Activity Progress */}
-                            <View style={{ flex: 1.1, paddingRight: 12 }}>
-                                <View className="mb-2">
-                                    <Text className={`text-[10px] font-black uppercase tracking-[1.5px] ${isDark ? 'text-[#9EB294]' : 'text-[#6B7280]'}`}>
-                                        ACTIVITY PROGRESS
-                                    </Text>
-                                </View>
-                                <ProgressBar
-                                    progress={overallProgress}
-                                    gradientColors={isDark ? ['#9EB294', '#5D6D54'] : ['#B5C0A2', '#5D6D54']}
-                                    trackColor={isDark ? "rgba(158, 178, 148, 0.05)" : "rgba(158, 178, 148, 0.2)"}
-                                    height={24}
-                                    fontSize={10}
-                                    floatingLabel={`${completedActivitiesCount}/${plannedActivities.length}`}
-                                />
-                            </View>
+                <TripOverviewCard
+                    balanceDetail={balanceDetail}
+                    balanceFormatted={balanceFormatted}
+                    budgetDisplayHome={budgetDisplayHome}
+                    completedActivitiesCount={completedActivitiesCount}
+                    homeCurrency={homeCurrency}
+                    isDark={isDark}
+                    isOverBudget={isOverBudget}
+                    isTripFinancialSyncing={isTripFinancialSyncing}
+                    overallProgress={overallProgress}
+                    plannedActivitiesCount={plannedActivities.length}
+                    totalCommittedHome={totalCommittedHome}
+                    totalCommittedTrip={totalCommittedTrip}
+                    totalWalletBudgetHome={totalWalletBudgetHome}
+                    totalWalletBudgetTrip={totalWalletBudgetTrip}
+                    tripActivitiesCount={tripActivities.length}
+                    tripCurrency={tripCurrency}
+                    onOpenAddExchange={() => setIsAddExchangeVisible(true)}
+                    onOpenExchangeHistory={() => setIsExchangeHistoryVisible(true)}
+                    onToggleBalanceMode={toggleBalanceMode}
+                    onToggleBudgetCurrency={toggleBudgetCurrency}
+                />
 
-                            <View style={{ width: 1, height: '70%', backgroundColor: isDark ? 'rgba(158, 178, 148, 0.15)' : 'rgba(93, 109, 84, 0.12)', marginHorizontal: 8 }} />
+                <TripDateNavigator
+                    currentDate={currentGroup?.date}
+                    dateCount={activitiesByDate.length}
+                    isDark={isDark}
+                    selectedIndex={safeDateIndex}
+                    onNext={() => setSelectedDateIndex(prev => Math.min(activitiesByDate.length - 1, prev + 1))}
+                    onPrevious={() => setSelectedDateIndex(prev => Math.max(0, prev - 1))}
+                />
 
-                            {/* Wallet Balance */}
-                            <View style={{ flex: 1, paddingLeft: 12 }}>
-                                <View style={{
-                                    borderRadius: 16,
-                                    overflow: 'hidden',
-                                    backgroundColor: isDark ? 'rgba(158,178,148,0.06)' : 'rgba(93,109,84,0.05)',
-                                    paddingVertical: 8,
-                                    paddingHorizontal: 10,
-                                }}>
-                                    {/* Faded watermark icon */}
-                                    <Feather
-                                        name="credit-card"
-                                        size={52}
-                                        color={isDark ? 'rgba(178,196,170,0.10)' : 'rgba(93,109,84,0.09)'}
-                                        style={{ position: 'absolute', right: -4, bottom: -6 }}
-                                    />
-                                    <GestureDetector
-                                        gesture={Gesture.Exclusive(
-                                            Gesture.Pan()
-                                                .activeOffsetX([-10, 10])
-                                                .failOffsetY([-8, 8])
-                                                .onEnd((event: any) => {
-                                                    if (Math.abs(event.translationX) > 30) runOnJS(toggleBalanceMode)();
-                                                }),
-                                            Gesture.LongPress()
-                                                .onEnd(() => { runOnJS(setIsExchangeHistoryVisible)(true); }),
-                                            Gesture.Tap()
-                                                .onEnd(() => { runOnJS(setIsAddExchangeVisible)(true); })
-                                        )}
-                                    >
-                                        <View style={{ alignItems: 'flex-end', justifyContent: 'center', width: '100%' }}>
-                                            <View style={{ height: 14, justifyContent: 'center' }}>
-                                                <Text className={`text-[10px] font-black uppercase tracking-[1.5px] ${isDark ? 'text-[#9EB294]' : 'text-[#6B7280]'}`} numberOfLines={1}>
-                                                    WALLET
-                                                </Text>
-                                            </View>
-                                            <View style={{ height: 30, justifyContent: 'center' }}>
-                                                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
-                                                    style={{ fontSize: 22, fontWeight: '900', color: isDark ? '#B2C4AA' : '#5D6D54' }}>
-                                                    {balanceFormatted}
-                                                </Text>
-                                            </View>
-                                            <View style={{ height: 11, justifyContent: 'center' }}>
-                                                <Text numberOfLines={1}
-                                                    style={{ fontSize: 7, fontWeight: '700', color: isDark ? '#9EB294' : '#9ca3af', letterSpacing: 0.5, opacity: balanceDetail ? 0.8 : 0, textTransform: 'uppercase' }}>
-                                                    {balanceDetail || ' '}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    </GestureDetector>
-                                </View>
-                            </View>
-                        </View>
-
-                        {/* Budget Allocation Indicator — inside stats card, spanning full width */}
-                        {tripActivities.length > 0 && totalWalletBudgetHome > 0 && (
-                            <GestureDetector
-                                gesture={Gesture.Pan()
-                                    .activeOffsetY([10, 50])
-                                    .onEnd((event: any) => {
-                                        if (event.translationY > 20) runOnJS(toggleBudgetCurrency)();
-                                    })
-                                }
-                            >
-                                <View style={{
-                                    paddingHorizontal: 20,
-                                    paddingBottom: 14,
-                                    paddingTop: 2,
-                                }}>
-                                    <View style={{
-                                        height: 1,
-                                        backgroundColor: isDark ? 'rgba(158, 178, 148, 0.1)' : 'rgba(93, 109, 84, 0.08)',
-                                        marginBottom: 10,
-                                    }} />
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                            <Feather
-                                                name={isOverBudget ? 'alert-circle' : 'check-circle'}
-                                                size={11}
-                                                color={isOverBudget ? '#ef4444' : (isDark ? '#9EB294' : '#5D6D54')}
-                                                style={{ marginRight: 4 }}
-                                            />
-                                            <Text style={{
-                                                fontSize: 9, fontWeight: '900', letterSpacing: 1.5, textTransform: 'uppercase',
-                                                color: isOverBudget ? '#ef4444' : (isDark ? '#9EB294' : '#6B7280'),
-                                            }}>
-                                                {isOverBudget ? 'OVER BUDGET' : 'WITHIN BUDGET'}
-                                            </Text>
-                                        </View>
-                                        <Text style={{ fontSize: 7, fontWeight: '700', color: isDark ? '#9EB294' : '#9CA3AF', letterSpacing: 0.5, textTransform: 'uppercase' }}>
-                                            Allotted vs Wallet
-                                        </Text>
-                                    </View>
-                                    {/* Budget bar: label always visible above bar */}
-                                    {(() => {
-                                        const budgetPct = totalWalletBudgetHome > 0 ? Math.min((totalCommittedHome / totalWalletBudgetHome) * 100, 100) : 0;
-                                        const barLabel = budgetDisplayHome
-                                            ? `${MathUtils.formatCurrency(totalCommittedHome, homeCurrency)} / ${MathUtils.formatCurrency(totalWalletBudgetHome, homeCurrency)}`
-                                            : `${MathUtils.formatCurrency(totalCommittedTrip, tripCurrency)} / ${MathUtils.formatCurrency(totalWalletBudgetTrip, tripCurrency)}`;
-                                        const barColor = isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54');
-                                        const trackColor = isDark ? 'rgba(158, 178, 148, 0.08)' : 'rgba(158, 178, 148, 0.15)';
-                                        return (
-                                            <View>
-                                                <Text style={{ fontSize: 10, fontWeight: '900', color: isDark ? 'rgba(242,240,232,0.85)' : 'rgba(26,28,24,0.75)', letterSpacing: 0.3, textAlign: 'center', marginBottom: 4 }} numberOfLines={1}>
-                                                    {barLabel}
-                                                </Text>
-                                                <View style={{ height: 6, borderRadius: 3, backgroundColor: trackColor }}>
-                                                    <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${budgetPct}%`, backgroundColor: barColor, borderRadius: 3 }} />
-                                                </View>
-                                            </View>
-                                        );
-                                    })()}
-                                </View>
-                            </GestureDetector>
-                        )}
-                    </GlassView>
-                </View>
-
-
-                {/* Date navigator */}
-                {activitiesByDate.length > 1 && (
-                    <View className="mt-6 mb-0">
-                        <View className="flex-row items-center justify-between mb-4 px-4">
-                            <TouchableOpacity
-                                onPress={() => setSelectedDateIndex(prev => Math.max(0, prev - 1))}
-                                disabled={safeDateIndex === 0}
-                                style={{ opacity: safeDateIndex === 0 ? 0.3 : 1 }}
-                                className={`w-10 h-10 rounded-full items-center justify-center ${isDark ? 'bg-[#3A3F37]' : 'bg-[#F2F0E8]'}`}
-                            >
-                                <Feather name="chevron-left" size={20} color={isDark ? "#B2C4AA" : "#5D6D54"} />
-                            </TouchableOpacity>
-
-                            <View className="items-center">
-                                <Text className={`text-[10px] font-black tracking-[2px] ${isDark ? 'text-[#9EB294]' : 'text-gray-400'}`}>
-                                    DAY {safeDateIndex + 1} OF {activitiesByDate.length}
-                                </Text>
-                                <Text className={`text-[14px] font-black ${isDark ? 'text-[#F2F0E8]' : 'text-[#5D6D54]'}`}>
-                                    {new Date(currentGroup?.date || 0).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}
-                                </Text>
-                            </View>
-
-                            <TouchableOpacity
-                                onPress={() => setSelectedDateIndex(prev => Math.min(activitiesByDate.length - 1, prev + 1))}
-                                disabled={safeDateIndex === activitiesByDate.length - 1}
-                                style={{ opacity: safeDateIndex === activitiesByDate.length - 1 ? 0.3 : 1 }}
-                                className={`w-10 h-10 rounded-full items-center justify-center ${isDark ? 'bg-[#3A3F37]' : 'bg-[#F2F0E8]'}`}
-                            >
-                                <Feather name="chevron-right" size={20} color={isDark ? "#B2C4AA" : "#5D6D54"} />
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                )}
-
-                {/* Continuous activities section — planned then spontaneous */}
                 <ActivitiesSection
                     activities={currentGroup?.activities || []}
-                    tripTitle={trip?.title}
+                    tripTitle={trip.title}
                     onPress={handlePressActivity}
                     onEdit={isAdmin ? handleEditActivity : undefined}
                     onDelete={isCreator ? handleDeleteActivity : undefined}
-                    onRequestDelete={(!isCreator && isAdmin) ? handleRequestDelete : undefined}
+                    onRequestDelete={!isCreator && isAdmin ? handleRequestDelete : undefined}
                     onToggleComplete={isAdmin ? toggleActivityCompletion : undefined}
                 />
             </ScrollView>
 
-            <BottomFade visible={showBottomFade} />
+            <TripDetailFooter
+                bottomInset={insets.bottom}
+                isAdmin={isAdmin}
+                isDark={isDark}
+                onOpenAnalysis={() => router.push('/(tabs)/analysis')}
+                onOpenChoiceModal={() => setIsChoiceModalVisible(true)}
+                onOpenHome={handleReturnHome}
+            />
 
-            {/* Permanent gradient fade above footer so cards don't overlap */}
-            <View pointerEvents="none" style={{
-                position: 'absolute', bottom: 64 + insets.bottom, left: 0, right: 0, height: 140, zIndex: 9,
-            }}>
-                <LinearGradient
-                    colors={[
-                        isDark ? 'rgba(26, 28, 24, 0)' : 'rgba(242, 240, 232, 0)',
-                        isDark ? 'rgba(26, 28, 24, 0.2)' : 'rgba(242, 240, 232, 0.2)',
-                        isDark ? 'rgba(26, 28, 24, 0.6)' : 'rgba(242, 240, 232, 0.6)',
-                        isDark ? 'rgba(26, 28, 24, 0.95)' : 'rgba(242, 240, 232, 0.95)',
-                    ]}
-                    locations={[0, 0.4, 0.75, 1]}
-                    style={{ flex: 1 }}
-                />
-            </View>
-
-            <View style={[styles.footerContainer, { height: 64 + insets.bottom, paddingBottom: insets.bottom, zIndex: 10 }]}>
-                <TabBg />
-                <View style={styles.footerIcons}>
-                    <TouchableOpacity
-                        onPress={() => router.push('/(tabs)')}
-                        className="flex-1 items-center justify-center h-full"
-                    >
-                        <Feather name="home" size={26} color="#9EB294" />
-                    </TouchableOpacity>
-
-                    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                        {isAdmin && (
-                            <TouchableOpacity
-                                testID="btn-add-activity"
-                                style={{ alignItems: 'center', justifyContent: 'center', top: -44 }}
-                                onPress={() => setIsChoiceModalVisible(true)}
-                                activeOpacity={0.8}
-                            >
-                                <View style={styles.fab}>
-                                    <Feather name="plus" size={36} color="#fff" />
-                                </View>
-                            </TouchableOpacity>
-                        )}
-                    </View>
-
-                    <TouchableOpacity
-                        onPress={() => router.push('/(tabs)/analysis')}
-                        className="flex-1 items-center justify-center h-full"
-                    >
-                        <Feather name="bar-chart-2" size={26} color="#9ca3af" />
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-
-            {/* Choice Modal */}
-            <Modal
+            <TripChoiceModal
                 visible={isChoiceModalVisible}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setIsChoiceModalVisible(false)}
-            >
-                <TouchableOpacity 
-                    style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}
-                    activeOpacity={1}
-                    onPress={() => setIsChoiceModalVisible(false)}
-                >
-                    <GlassView
-                        intensity={isDark ? 30 : 90}
-                        borderRadius={32}
-                        backgroundColor={isDark ? "rgba(40, 44, 38, 0.95)" : "rgba(255, 255, 255, 0.95)"}
-                        style={{ width: SCREEN_WIDTH - 64, padding: 32 }}
-                    >
-                        <Text style={{ fontSize: 18, fontWeight: '900', color: isDark ? '#F2F0E8' : '#111827', textAlign: 'center', marginBottom: 24, letterSpacing: 1 }}>WHAT'S THE PLAN?</Text>
-                        
-                        <TouchableOpacity 
-                            onPress={() => {
-                                setIsChoiceModalVisible(false);
-                                router.push(`/create-activity?tripId=${id}` as any);
-                            }}
-                            className="bg-[#5D6D54] py-4 rounded-2xl flex-row items-center justify-center mb-4"
-                        >
-                            <Feather name="calendar" size={20} color="#fff" style={{ marginRight: 10 }} />
-                            <Text className="text-white font-black uppercase tracking-widest text-[12px]">Plan Activity</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            onPress={() => {
-                                setIsChoiceModalVisible(false);
-                                setIsSpontaneousModalVisible(true);
-                            }}
-                            style={{ borderColor: '#5D6D54', borderWidth: 2 }}
-                            className="py-4 rounded-2xl flex-row items-center justify-center mb-4"
-                        >
-                            <Feather name="zap" size={20} color="#5D6D54" style={{ marginRight: 10 }} />
-                            <Text className="text-[#5D6D54] font-black uppercase tracking-widest text-[12px]">Spontaneous Log</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            onPress={() => {
-                                setIsChoiceModalVisible(false);
-                                setIsBuddiesVisible(true);
-                            }}
-                            style={{ borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(93,109,84,0.15)', borderWidth: 1 }}
-                            className="py-4 rounded-2xl flex-row items-center justify-center"
-                        >
-                            <Feather name="users" size={18} color={isDark ? '#9EB294' : '#6B7280'} style={{ marginRight: 10 }} />
-                            <Text style={{ color: isDark ? '#9EB294' : '#6B7280' }} className="font-black uppercase tracking-widest text-[12px]">Manage Members</Text>
-                        </TouchableOpacity>
-                    </GlassView>
-                </TouchableOpacity>
-            </Modal>
+                isDark={isDark}
+                onClose={() => setIsChoiceModalVisible(false)}
+                onManageMembers={() => {
+                    setIsChoiceModalVisible(false);
+                    setIsBuddiesVisible(true);
+                }}
+                onPlanActivity={() => {
+                    setIsChoiceModalVisible(false);
+                    router.push(`/create-activity?tripId=${id}` as any);
+                }}
+                onSpontaneousLog={() => {
+                    setIsChoiceModalVisible(false);
+                    setEditingSpontaneousActivity(null);
+                    setIsSpontaneousModalVisible(true);
+                }}
+            />
 
             <SpontaneousExpenseModal
                 visible={isSpontaneousModalVisible}
-                onClose={() => setIsSpontaneousModalVisible(false)}
+                onClose={handleCloseSpontaneousModal}
                 onLog={handleLogSpontaneous}
                 tripId={id as string}
-                date={currentGroup?.date || new Date().setHours(0,0,0,0)}
+                date={editingSpontaneousActivity?.date || currentGroup?.date || new Date().setHours(0, 0, 0, 0)}
+                initialActivity={editingSpontaneousActivity}
             />
 
-            {/* Deletion Confirmation Modal */}
             <ConfirmationModal
                 visible={!!deletingActivity}
                 onClose={() => setDeletingActivity(null)}
@@ -764,7 +447,6 @@ export default function TripDetailScreen() {
                 confirmLabel="DELETE"
             />
 
-            {/* Edit Confirmation Modal */}
             <ConfirmationModal
                 visible={!!editingActivity}
                 onClose={() => setEditingActivity(null)}
@@ -792,40 +474,6 @@ export default function TripDetailScreen() {
                 visible={isBuddiesVisible}
                 onClose={() => setIsBuddiesVisible(false)}
             />
-
         </MeshBackground>
     );
 }
-
-const styles = StyleSheet.create({
-
-    fab: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        backgroundColor: '#5D6D54',
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#5D6D54',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.3,
-        shadowRadius: 15,
-        elevation: 12,
-    },
-    footerContainer: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        backgroundColor: 'transparent',
-    },
-    footerIcons: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 64,
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-});

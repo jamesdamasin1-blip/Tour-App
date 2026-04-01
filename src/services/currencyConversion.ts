@@ -1,5 +1,3 @@
-import { Wallet } from '../types/models';
-
 /**
  * Service for stable currency conversion based on baseline rates.
  */

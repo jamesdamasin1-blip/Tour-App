@@ -13,6 +13,16 @@ const safeNum = (v: unknown, fallback = 0): number => {
     return Number.isFinite(n) ? n : fallback;
 };
 
+const toTimestampValue = (value: unknown): string | undefined => {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value === 'string') return value;
+
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return undefined;
+
+    return new Date(numeric).toISOString();
+};
+
 /**
  * Map a Supabase wallets row (snake_case) → Wallet (camelCase).
  * `existingWallet` is passed to preserve locally-held fields not stored in DB
@@ -80,6 +90,9 @@ export function mapFundingLotFromDb(row: Record<string, any>): ExchangeEvent {
         tripAmount: rate > 0 ? sourceAmount / rate : 0,
         rate,
         date: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+        sourceCurrency: row.source_currency ?? undefined,
+        targetCurrency: row.target_currency ?? undefined,
+        entryKind: row.entry_kind ?? undefined,
         notes: row.notes ?? undefined,
         version: safeNum(row.version, 1),
         updatedBy: row.updated_by ?? undefined,
@@ -102,8 +115,9 @@ export function mapFundingLotToDb(data: Partial<ExchangeEvent> & { id: string })
         target_currency: (data as any).targetCurrency,
         source_amount: data.homeAmount ?? (data as any).sourceAmount,
         rate: data.rate,
+        entry_kind: data.entryKind,
         notes: data.notes,
-        created_at: data.date ?? (data as any).createdAt,
+        created_at: toTimestampValue(data.date ?? (data as any).createdAt),
         field_updates: data.fieldUpdates,
     };
 }

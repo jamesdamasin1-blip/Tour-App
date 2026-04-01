@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, StyleSheet, Dimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { GlassView } from '@/components/GlassView';
 import { COUNTRIES } from '@/src/data/countries';
@@ -15,6 +15,8 @@ interface CountryPickerModalProps {
     disabledCountries?: string[];
 }
 
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
 export const CountryPickerModal = ({ visible, onClose, selectedCountries, onToggleCountry, isDark, disabledCountries = [] }: CountryPickerModalProps) => {
     const [search, setSearch] = useState('');
 
@@ -23,15 +25,18 @@ export const CountryPickerModal = ({ visible, onClose, selectedCountries, onTogg
     );
 
     return (
-        <AnimatedModal visible={visible} onClose={onClose} origin="bottom">
-            <View className="flex-1 justify-end">
+        <AnimatedModal visible={visible} onClose={onClose}>
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={styles.container}
+            >
                 <GlassView
                     intensity={isDark ? 80 : 95}
                     borderRadius={32}
                     borderWidth={1}
                     borderColor={isDark ? "rgba(158, 178, 148, 0.1)" : "rgba(255, 255, 255, 0.4)"}
                     backgroundColor={isDark ? "rgba(40, 44, 38, 0.95)" : "rgba(242, 240, 228, 0.95)"}
-                    style={{ height: '80%', padding: 24, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
+                    style={styles.modalContent}
                 >
                     <View className="flex-row items-center justify-between mb-6">
                         <Text className={`text-xl font-black uppercase tracking-tight ${isDark ? 'text-[#F2F0E8]' : 'text-[#1a1a1a]'}`}>Select Country</Text>
@@ -55,7 +60,11 @@ export const CountryPickerModal = ({ visible, onClose, selectedCountries, onTogg
                         />
                     </View>
 
-                    <ScrollView showsVerticalScrollIndicator={false} className="flex-1">
+                    <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        className="flex-1"
+                        keyboardShouldPersistTaps="handled"
+                    >
                         <View className="pb-10">
                                 {filteredCountries.map((c: string) => {
                                     const isDisabled = disabledCountries.includes(c);
@@ -89,7 +98,21 @@ export const CountryPickerModal = ({ visible, onClose, selectedCountries, onTogg
                         <Text className="text-white font-black uppercase tracking-widest text-[14px]">Done</Text>
                     </PressableScale>
                 </GlassView>
-            </View>
+            </KeyboardAvoidingView>
         </AnimatedModal>
     );
 };
+
+const styles = StyleSheet.create({
+    container: {
+        width: '100%',
+        maxWidth: 420,
+        alignSelf: 'center',
+        justifyContent: 'center',
+    },
+    modalContent: {
+        width: '100%',
+        height: Math.min(SCREEN_HEIGHT * 0.78, 620),
+        padding: 24,
+    },
+});

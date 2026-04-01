@@ -1,6 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import React, { useState, useRef } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, TextInput } from 'react-native';
 import { useStore } from '../src/store/useStore';
 import { GlassView } from './GlassView';
 import { AnimatedModal, StepTransition } from './AnimatedModal';

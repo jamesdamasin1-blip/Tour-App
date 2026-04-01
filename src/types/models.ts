@@ -61,6 +61,9 @@ export interface ExchangeEvent {
     tripAmount: number;
     rate: number;
     date: number;
+    sourceCurrency?: string;
+    targetCurrency?: string;
+    entryKind?: 'initial' | 'top_up';
     notes?: string;
     // Sync fields
     version: number;
@@ -158,7 +161,8 @@ export interface TripPlan {
     totalBudgetHomeCached: number; // Total budget across all wallets in Home Currency
     spontaneousEvents?: { id: string; amount: number }[]; // Audit trail for spontaneous spent accumulation
 
-    // Legacy support (to be transitioned)
+    // Display/support fields derived from the primary wallet.
+    // Financial source of truth remains wallets + totalBudgetHomeCached.
     tripCurrency: string;
     totalBudgetTrip: number;
     totalBudget: number;
@@ -178,4 +182,3 @@ export interface TripPlan {
     fieldUpdates?: Record<string, number>;
     lastDeviceId?: string;
 }
-

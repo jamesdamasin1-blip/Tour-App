@@ -11,12 +11,15 @@ interface ActivityFormFinanceProps {
     setActualCost: (text: string) => void;
     actualCurrency: string;
     setActualCurrency: (curr: string) => void;
-    availableCurrencies: string[];
+    budgetAvailableCurrencies: string[];
+    actualAvailableCurrencies: string[];
     isDark: boolean;
     isAdmin: boolean;
     activityId?: string;
     hasExpenses?: boolean;
     errors: Record<string, string>;
+    actualCostHelperText?: string;
+    actualCostValidationError?: string;
 }
 
 export const ActivityFormFinance: React.FC<ActivityFormFinanceProps> = ({
@@ -24,11 +27,14 @@ export const ActivityFormFinance: React.FC<ActivityFormFinanceProps> = ({
     budgetCurrency, setBudgetCurrency,
     actualCost, setActualCost,
     actualCurrency, setActualCurrency,
-    availableCurrencies,
+    budgetAvailableCurrencies,
+    actualAvailableCurrencies,
     isDark, isAdmin,
     activityId,
     hasExpenses = false,
-    errors
+    errors,
+    actualCostHelperText,
+    actualCostValidationError,
 }) => {
     return (
         <View className="px-4 pb-4 mt-2">
@@ -40,7 +46,7 @@ export const ActivityFormFinance: React.FC<ActivityFormFinanceProps> = ({
                 onAmountChange={setAllocatedBudget}
                 currency={budgetCurrency}
                 onCurrencyChange={setBudgetCurrency}
-                options={availableCurrencies}
+                options={budgetAvailableCurrencies}
                 editable={isAdmin}
                 error={errors.budget || errors.allocatedBudget}
             />
@@ -53,13 +59,10 @@ export const ActivityFormFinance: React.FC<ActivityFormFinanceProps> = ({
                         onAmountChange={setActualCost}
                         currency={actualCurrency}
                         onCurrencyChange={setActualCurrency}
-                        options={availableCurrencies}
+                        options={actualAvailableCurrencies}
                         editable={isAdmin && hasExpenses}
-                        helperText={
-                            hasExpenses
-                                ? "Editing this will create a manual adjustment expense to match the total."
-                                : "Add an expense first to enable editing the actual cost."
-                        }
+                        error={actualCostValidationError || errors.actualCost}
+                        helperText={actualCostHelperText}
                     />
                 </View>
             )}
