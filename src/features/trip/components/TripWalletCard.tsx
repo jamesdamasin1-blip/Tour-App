@@ -18,7 +18,7 @@ export const TripWalletCard = ({ tripId, onLongPress }: TripWalletCardProps) => 
         homeCurrency 
     } = useTripWallet(tripId);
     
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     return (

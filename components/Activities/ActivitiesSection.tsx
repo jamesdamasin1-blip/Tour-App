@@ -20,7 +20,7 @@ type ViewMode = 'planned' | 'spontaneous';
 export const ActivitiesSection = React.memo(({
     activities, tripTitle, onPress, onEdit, onDelete, onRequestDelete, onToggleComplete,
 }: Props) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const [mode, setMode] = useState<ViewMode>('planned');
 

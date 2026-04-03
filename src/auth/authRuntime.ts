@@ -1,6 +1,7 @@
 import { type AuthState, getAuthState, linkLocalDataToUser, onAuthStateChange } from './googleAuth';
 import { startSyncLoop, stopSyncLoop, runSync } from '../sync/syncEngine';
 import { useStore } from '../store/useStore';
+import { syncTrace, traceDuration } from '../sync/debug';
 
 type AuthRuntimeSnapshot = {
     auth: AuthState;
@@ -57,6 +58,7 @@ const applyAuthState = (
     nextAuth: AuthState,
     options: { triggerSync?: boolean } = {}
 ): void => {
+    const startedAt = Date.now();
     const authKey = `${nextAuth.isAuthenticated ? 'auth' : 'anon'}:${nextAuth.userId ?? ''}`;
     const authChanged = authKey !== lastAppliedAuthKey;
     lastAppliedAuthKey = authKey;
@@ -66,6 +68,9 @@ const applyAuthState = (
     if (!nextAuth.isAuthenticated || !nextAuth.userId) {
         lastSyncedUserId = null;
         stopSyncLoop();
+        traceDuration('AuthRuntime', 'apply_auth_state_anon', startedAt, {
+            authChanged,
+        });
         return;
     }
 
@@ -77,8 +82,18 @@ const applyAuthState = (
 
     if (shouldTriggerSync) {
         lastSyncedUserId = nextAuth.userId;
+        syncTrace('AuthRuntime', 'trigger_sync_after_auth', {
+            userId: nextAuth.userId,
+            authChanged,
+        });
         runSync().catch(console.error);
     }
+
+    traceDuration('AuthRuntime', 'apply_auth_state_auth', startedAt, {
+        userId: nextAuth.userId,
+        authChanged,
+        shouldTriggerSync,
+    });
 };
 
 const handleAuthState = (
@@ -99,17 +114,31 @@ export const bootstrapAuthState = (
 export const ensureAuthRuntime = async (): Promise<void> => {
     if (!authRuntimeStarted) {
         authRuntimeStarted = true;
+        syncTrace('AuthRuntime', 'start_listener');
         onAuthStateChange(nextAuth => {
+            syncTrace('AuthRuntime', 'on_auth_state_change', {
+                userId: nextAuth.userId,
+                isAuthenticated: nextAuth.isAuthenticated,
+            });
             handleAuthState(nextAuth, { triggerSync: true });
         });
     }
 
     if (!initPromise) {
+        const startedAt = Date.now();
+        syncTrace('AuthRuntime', 'initial_auth_bootstrap_start');
         initPromise = getAuthState()
             .then(nextAuth => {
                 handleAuthState(nextAuth, { triggerSync: nextAuth.isAuthenticated });
+                traceDuration('AuthRuntime', 'initial_auth_bootstrap_done', startedAt, {
+                    userId: nextAuth.userId,
+                    isAuthenticated: nextAuth.isAuthenticated,
+                });
             })
             .catch(err => {
+                traceDuration('AuthRuntime', 'initial_auth_bootstrap_failed', startedAt, {
+                    message: err instanceof Error ? err.message : String(err),
+                });
                 console.error('[useAuth] Failed to initialize auth runtime:', err);
                 updateSnapshot(EMPTY_AUTH_STATE, false);
             });

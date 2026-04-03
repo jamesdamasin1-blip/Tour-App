@@ -14,6 +14,7 @@ import Animated, {
 import { getFlagUrl } from '../src/data/countryMapping';
 import { useStore } from '../src/store/useStore';
 import { Calculations as MathUtils } from '../src/utils/mathUtils';
+import { formatTripDateRange } from '../src/utils/tripDates';
 import { GlassView } from './GlassView';
 import { AnimatedValueText } from './AnimatedValueText';
 import { ProgressBar } from './ProgressBar';
@@ -24,6 +25,9 @@ interface TripCardProps {
     countries?: string[];
     startDate: number;
     endDate: number;
+    startDateKey?: string;
+    endDateKey?: string;
+    homeCountry?: string;
     budget: number;
     spent: number;
     homeBudget?: number;
@@ -50,6 +54,9 @@ export const TripCard = React.memo(({
     countries = [],
     startDate,
     endDate,
+    startDateKey,
+    endDateKey,
+    homeCountry,
     budget,
     spent,
     homeBudget,
@@ -64,13 +71,20 @@ export const TripCard = React.memo(({
     onDelete,
     onEdit,
 }: TripCardProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const [showTripCurrency, setShowTripCurrency] = useState(false);
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const dateRange = `${start.toLocaleDateString([], { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const dateRange = useMemo(
+        () => formatTripDateRange({
+            startDateKey,
+            startDate,
+            endDateKey,
+            endDate,
+            homeCountry,
+        }),
+        [endDate, endDateKey, homeCountry, startDate, startDateKey]
+    );
     const hasAlternateCurrency = tripCurrency !== homeCurrency && typeof homeBudget === 'number' && typeof homeSpent === 'number';
     const displayBudget = hasAlternateCurrency && showTripCurrency ? budget : (homeBudget ?? budget);
     const displaySpent = hasAlternateCurrency && showTripCurrency ? spent : (homeSpent ?? spent);
@@ -199,7 +213,7 @@ export const TripCard = React.memo(({
                         >
                             {/* Flag overlay */}
                             <View style={styles.flagsOverlay}>
-                                {countries.map((country, index) => {
+                                {countries.slice(0, 2).map((country, index) => {
                                     const flagUrl = getFlagUrl(country);
                                     if (!flagUrl) return null;
                                     return (
@@ -252,24 +266,28 @@ export const TripCard = React.memo(({
 
                             {/* Content */}
                             <View style={styles.cardPadding}>
-                                <Text 
-                                    style={[styles.title, isDark && { color: '#F2F0E8' }]} 
-                                    numberOfLines={2}
-                                    adjustsFontSizeToFit
-                                    minimumFontScale={0.8}
-                                >
-                                    {title}
-                                </Text>
+                                <View style={styles.titleRow}>
+                                    <Text 
+                                        style={[styles.title, isDark && { color: '#F2F0E8' }]} 
+                                        numberOfLines={2}
+                                        adjustsFontSizeToFit
+                                        minimumFontScale={0.8}
+                                    >
+                                        {title}
+                                    </Text>
+                                </View>
                                 
                                 {balance && (
                                     <View style={[styles.balanceBadge, { backgroundColor: isDark ? 'rgba(158, 178, 148, 0.08)' : 'rgba(93, 109, 84, 0.04)' }]}>
                                         <AnimatedValueText
                                             text={balance}
+                                            animated={false}
                                             style={[styles.balanceAmount, { color: isDark ? '#B2C4AA' : '#5D6D54' }]}
                                         />
                                         {balanceDetail && (
                                             <AnimatedValueText
                                                 text={balanceDetail}
+                                                animated={false}
                                                 style={styles.balanceDetail}
                                             />
                                         )}
@@ -285,6 +303,7 @@ export const TripCard = React.memo(({
                                     <View>
                                         <ProgressBar
                                             progress={percentage}
+                                            animated={false}
                                             gradientColors={['#B5C0A2', '#5D6D54']}
                                             trackColor={isDark ? "rgba(158, 178, 148, 0.15)" : "rgba(93, 109, 84, 0.12)"}
                                             height={32}
@@ -344,6 +363,13 @@ const styles = StyleSheet.create({
         paddingVertical: 18,
         zIndex: 10,
     },
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 10,
+        marginBottom: 4,
+    },
     title: {
         fontSize: 18,
         fontWeight: '900',
@@ -351,7 +377,23 @@ const styles = StyleSheet.create({
         textTransform: 'uppercase',
         lineHeight: 22,
         textAlign: 'left',
-        marginBottom: 4,
+        flex: 1,
+    },
+    requestBadge: {
+        minWidth: 28,
+        height: 28,
+        borderRadius: 14,
+        borderWidth: 1,
+        paddingHorizontal: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+    },
+    requestBadgeText: {
+        fontSize: 10,
+        fontWeight: '900',
+        color: '#ef4444',
     },
     balanceBadge: {
         alignSelf: 'flex-start',

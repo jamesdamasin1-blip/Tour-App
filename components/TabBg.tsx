@@ -12,7 +12,7 @@ interface TabBgProps {
 }
 
 export const TabBg: React.FC<TabBgProps> = ({ color, overlapTop = 0 }) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     
     const insets = useSafeAreaInsets();

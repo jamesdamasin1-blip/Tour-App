@@ -3,24 +3,43 @@ import React from 'react';
 import { useStore } from '../src/store/useStore';
 import { Image, Text, TouchableOpacity, View } from 'react-native';
 import { getFlagUrl } from '../src/data/countryMapping';
+import { formatTripDateRange } from '../src/utils/tripDates';
 import { GlassView } from './GlassView';
 
 interface TripSelectionItemProps {
     title: string;
     startDate: number;
     endDate: number;
+    startDateKey?: string;
+    endDateKey?: string;
+    homeCountry?: string;
     countries: string[];
     onSelect: () => void;
     intensity?: number;
     backgroundColor?: string;
 }
 
-export const TripSelectionItem = ({ title, startDate, endDate, countries, onSelect, intensity = 60, backgroundColor = "rgba(255, 255, 255, 0.5)" }: TripSelectionItemProps) => {
-    const { theme } = useStore();
+export const TripSelectionItem = ({
+    title,
+    startDate,
+    endDate,
+    startDateKey,
+    endDateKey,
+    homeCountry,
+    countries,
+    onSelect,
+    intensity = 60,
+    backgroundColor = "rgba(255, 255, 255, 0.5)",
+}: TripSelectionItemProps) => {
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const dateRange = `${start.toLocaleDateString([], { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const dateRange = formatTripDateRange({
+        startDateKey,
+        startDate,
+        endDateKey,
+        endDate,
+        homeCountry,
+    });
 
     return (
         <TouchableOpacity

@@ -61,3 +61,12 @@ emulator_local_db.db
 device1.png
 device2.png
 supabase/.temp/
+metro-cache/
+metro.log
+metro-start.out
+metro-start.err
+rkstorage.db
+budget_logs_*.png
+budget_ui.xml
+budget_ui_summary.txt
+trip_top.png

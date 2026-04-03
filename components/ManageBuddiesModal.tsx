@@ -7,9 +7,8 @@ import { refreshTripCloudState } from '@/src/store/cloudSyncHelpers';
 import { getDisplayTripMembers } from '@/src/utils/memberAttribution';
 import { Feather } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { Share, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { ManageMembersInviteSection, MembersListSection, RemoveMemberPrompt } from '@/src/features/trip/components/member/ManageMembersSections';
-import { buildTripShareCode, buildTripShareQrPayload } from '@/src/features/trip/components/member/memberSharePayload';
 
 interface ManageMembersModalProps {
     tripId: string;
@@ -21,14 +20,14 @@ interface ManageMembersModalProps {
 export const ManageBuddiesModal = ManageMembersModal;
 
 export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersModalProps) {
-    const { theme, trips, removeMember, updateMemberRole, activities, sendEmailInvite } = useStore();
+    const { theme, trips, removeMember, updateMemberRole, sendEmailInvite } = useStore();
     const { userId, email: userEmail, displayName, isAuthenticated } = useAuth();
     const isDark = theme === 'dark';
     const trip = trips.find(item => item.id === tripId);
     const members = getDisplayTripMembers(trip).filter(member => !(member as any).removed);
     const { canManageMembers } = usePermissions(tripId);
 
-    const [isAdding, setIsAdding] = useState<false | 'qr' | 'code' | 'google'>(false);
+    const [isAdding, setIsAdding] = useState<false | 'email'>(false);
     const [removingId, setRemovingId] = useState<string | null>(null);
     const [isSyncing, setIsSyncing] = useState(false);
     const [inviteEmail, setInviteEmail] = useState('');
@@ -49,16 +48,6 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
         setIsSyncing(true);
         refreshTripCloudState(tripId).finally(() => setIsSyncing(false));
     }, [tripId, visible]);
-
-    const handleShareCode = async () => {
-        try {
-            const encodedData = buildTripShareCode(trip, activities);
-            const message = `Hey! Join my trip "${trip?.title}" on Aliqual.\n\nCopy this code and select the "+" icon:\n\n${encodedData}`;
-            await Share.share({ message, title: `Join ${trip?.title}` });
-        } catch {
-            // no-op
-        }
-    };
 
     const handleRemove = () => {
         if (!removingId) return;
@@ -115,12 +104,12 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
     const removingMember = members.find(member => member.id === removingId);
 
     return (
-        <AnimatedModal visible={visible} onClose={handleClose}>
+        <AnimatedModal visible={visible} onClose={handleClose} keyboardAware>
             <GlassView
                 intensity={isDark ? 30 : 90}
                 borderRadius={32}
                 backgroundColor={isDark ? 'rgba(40, 44, 38, 0.97)' : 'rgba(255, 255, 255, 0.97)'}
-                style={{ width: 320, padding: 28, alignSelf: 'center' }}
+                style={{ width: 320, maxWidth: '100%', maxHeight: '82%', padding: 28, alignSelf: 'center' }}
             >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -160,14 +149,12 @@ export function ManageMembersModal({ tripId, visible, onClose }: ManageMembersMo
                             isAuthenticated={isAuthenticated}
                             isDark={isDark}
                             isSending={isSending}
-                            qrPayload={buildTripShareQrPayload(trip)}
                             onBack={handleBackFromAdding}
                             onChangeEmail={value => { setInviteEmail(value); setInviteError(''); }}
                             onInviteAnother={() => { setInviteSent(false); setInviteEmail(''); }}
                             onSelectMode={setIsAdding}
                             onSelectRole={setInviteRole}
                             onSendInvite={handleEmailInvite}
-                            onShareCode={handleShareCode}
                         />
                     </>
                 )}

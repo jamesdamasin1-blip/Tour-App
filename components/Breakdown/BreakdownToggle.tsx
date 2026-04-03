@@ -18,7 +18,7 @@ const MODES: { key: BreakdownMode; label: string }[] = [
 ];
 
 export const BreakdownToggle = React.memo(({ mode, onChange, totals, currency }: Props) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     const activeAmount =

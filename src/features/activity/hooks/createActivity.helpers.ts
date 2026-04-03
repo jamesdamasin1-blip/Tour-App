@@ -113,7 +113,11 @@ export function reconcileActualExpenses({
 }: ReconcileActualExpenseParams) {
     const numericActualCost = actualCost.trim() !== '' ? MathUtils.parseCurrencyInput(actualCost) : null;
     if (numericActualCost === null) {
-        return [...(editingActivity.expenses || [])];
+        return editingActivity.expenses || [];
+    }
+
+    if (numericActualCost <= 0) {
+        return [];
     }
 
     const diff = numericActualCost - currentSpent;
@@ -155,9 +159,11 @@ export function reconcileActualExpenses({
             homeCurrency,
             effectiveRate
         );
+        const primaryExpense = editingActivity.expenses?.[0];
+        const nextTimestamp = Date.now();
 
         return [{
-            id: MathUtils.generateId(),
+            id: primaryExpense?.id || MathUtils.generateId(),
             tripId,
             walletId,
             activityId,
@@ -167,16 +173,17 @@ export function reconcileActualExpenses({
             currency: activeWalletCurrency || homeCurrency,
             convertedAmountHome: amountInHome,
             convertedAmountTrip: amountInTrip,
-            date: Date.now(),
-            time: Date.now(),
+            date: primaryExpense?.date || nextTimestamp,
+            time: primaryExpense?.time || nextTimestamp,
             originalAmount: numericActualCost,
             originalCurrency: actualCurrency,
-            createdBy: currentMemberId || undefined,
+            createdBy: primaryExpense?.createdBy || currentMemberId || undefined,
+            lastModifiedBy: currentMemberId || primaryExpense?.lastModifiedBy,
             version: 1,
         }];
     }
 
-    return [...(editingActivity.expenses || [])];
+    return editingActivity.expenses || [];
 }
 
 function normalizeActualAmounts(

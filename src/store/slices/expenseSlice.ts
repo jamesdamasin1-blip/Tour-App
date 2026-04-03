@@ -2,12 +2,13 @@ import { StateCreator } from 'zustand';
 import { Activity, Expense, ExpenseCategory } from '../../types/models';
 import { generateId } from '../../utils/mathUtils';
 import { getDefaultLot, getWalletBalance } from '../../finance/wallet/walletEngine';
+import { getDeviceId } from '../../auth/googleAuth';
 import type { AppState } from '../useStore';
 import {
     beginTripCloudMutation,
     endTripCloudMutation,
     fetchTripCloudBundle,
-    refreshTripCloudState,
+    refreshTripCloudStateInBackground,
     setWalletErrorState,
 } from '../cloudSyncHelpers';
 import { syncTrace, summarizeActivity, summarizeExpenses, summarizeTrip, summarizeWallet } from '../../sync/debug';
@@ -123,8 +124,8 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
             if (expenseErr) throw expenseErr;
             syncTrace('ExpenseMutation', 'rpc_add_success', summarizeExpenses([newExpense]));
 
-            await refreshTripCloudState(tripId);
-            syncTrace('ExpenseMutation', 'refresh_after_add_done', { tripId, walletId, activityId });
+            refreshTripCloudStateInBackground(tripId, 'expense_add');
+            syncTrace('ExpenseMutation', 'refresh_after_add_deferred', { tripId, walletId, activityId });
         } catch (error: any) {
             setWalletErrorState(error?.message || 'Check your wallet balances!');
             syncTrace('ExpenseMutation', 'add_failed', {
@@ -210,8 +211,8 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
             if (expenseErr) throw expenseErr;
             syncTrace('ExpenseMutation', 'rpc_update_success', summarizeExpenses([updatedExpense]));
 
-            await refreshTripCloudState(tripId);
-            syncTrace('ExpenseMutation', 'refresh_after_update_done', { tripId, expenseId: id });
+            refreshTripCloudStateInBackground(tripId, 'expense_update');
+            syncTrace('ExpenseMutation', 'refresh_after_update_deferred', { tripId, expenseId: id });
         } catch (error: any) {
             setWalletErrorState(error?.message || 'Check your wallet balances!');
             syncTrace('ExpenseMutation', 'update_failed', {
@@ -241,8 +242,8 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
             if (expenseErr) throw expenseErr;
             syncTrace('ExpenseMutation', 'rpc_delete_success', { tripId, expenseId: id });
 
-            await refreshTripCloudState(tripId);
-            syncTrace('ExpenseMutation', 'refresh_after_delete_done', { tripId, expenseId: id });
+            refreshTripCloudStateInBackground(tripId, 'expense_delete');
+            syncTrace('ExpenseMutation', 'refresh_after_delete_deferred', { tripId, expenseId: id });
         } catch (error: any) {
             setWalletErrorState(error?.message || 'Check your wallet balances!');
             syncTrace('ExpenseMutation', 'delete_failed', {
@@ -262,6 +263,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
         try {
             setWalletErrorState(null);
             syncTrace('ExpenseMutation', 'submit_spontaneous', { tripId, walletId, data });
+            const deviceId = getDeviceId();
             const localTrip = _get().trips.find(trip => trip.id === tripId);
             const localWallet = localTrip?.wallets.find(wallet => wallet.id === walletId);
             const wallet = localWallet ?? (await fetchTripCloudBundle(tripId))?.wallets.find(existing => existing.id === walletId);
@@ -300,6 +302,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 originalCurrency: data.originalCurrency,
                 version: 1,
                 deletedAt: null,
+                lastDeviceId: deviceId,
                 lastModified,
                 fieldUpdates: stampFieldUpdates({}, {
                     tripId,
@@ -335,6 +338,7 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 countries: [],
                 version: 1,
                 deletedAt: null,
+                lastDeviceId: deviceId,
                 fieldUpdates: stampFieldUpdates({}, {
                     tripId,
                     walletId,
@@ -359,8 +363,8 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 expense: summarizeExpenses([newExpense]),
             });
 
-            await refreshTripCloudState(tripId);
-            syncTrace('ExpenseMutation', 'refresh_after_spontaneous_done', { tripId, walletId });
+            refreshTripCloudStateInBackground(tripId, 'expense_spontaneous');
+            syncTrace('ExpenseMutation', 'refresh_after_spontaneous_deferred', { tripId, walletId });
         } catch (error: any) {
             setWalletErrorState(error?.message || 'Check your wallet balances!');
             syncTrace('ExpenseMutation', 'spontaneous_failed', {

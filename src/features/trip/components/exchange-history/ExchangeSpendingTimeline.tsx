@@ -7,14 +7,12 @@ import { ScrollView, Text, View } from 'react-native';
 type ExchangeSpendingTimelineProps = {
     accentColor: string;
     groupedTimeline: Record<string, any[]>;
-    homeCurrency: string;
     isDark: boolean;
 };
 
 export function ExchangeSpendingTimeline({
     accentColor,
     groupedTimeline,
-    homeCurrency,
     isDark,
 }: ExchangeSpendingTimelineProps) {
     return (
@@ -25,12 +23,24 @@ export function ExchangeSpendingTimeline({
                         {date}
                     </Text>
                     {groupedTimeline[date].map((entry: any) => {
-                        const { expense, activity, balanceAfterHome, walletCurrency, walletExchangeRate } = entry;
+                        const {
+                            expense,
+                            activity,
+                            displayAmount,
+                            displayBalanceAfter,
+                            displayCurrency,
+                            equivalentAmount,
+                            equivalentCurrency,
+                        } = entry;
                         const isSpontaneous = activity?.isSpontaneous;
                         const expenseLabel = isSpontaneous ? 'Spontaneous Activity' : (activity?.title || 'Expense');
-                        const homeAmount = expense.convertedAmountHome || expense.amount || 0;
-                        const showOriginal = expense.currency && expense.currency !== homeCurrency;
-                        const balanceInWallet = showOriginal && walletExchangeRate > 0 ? balanceAfterHome / walletExchangeRate : null;
+                        const showEquivalent = equivalentCurrency && equivalentAmount > 0;
+                        const equivalentText = showEquivalent
+                            ? MathUtils.formatCurrency(equivalentAmount, equivalentCurrency)
+                            : null;
+                        const balanceText = displayBalanceAfter == null
+                            ? null
+                            : MathUtils.formatCurrency(displayBalanceAfter, displayCurrency);
 
                         return (
                             <View
@@ -38,6 +48,7 @@ export function ExchangeSpendingTimeline({
                                 style={{
                                     borderRadius: 20,
                                     marginBottom: 10,
+                                    minHeight: 94,
                                     backgroundColor: isDark ? 'rgba(239, 68, 68, 0.06)' : 'rgba(239, 68, 68, 0.04)',
                                     borderWidth: 1,
                                     borderColor: isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.1)',
@@ -71,12 +82,12 @@ export function ExchangeSpendingTimeline({
 
                                     <View style={{ alignItems: 'flex-end', flexShrink: 0 }}>
                                         <AnimatedValueText
-                                            text={`-${MathUtils.formatCurrency(homeAmount, homeCurrency)}`}
+                                            text={`-${MathUtils.formatCurrency(displayAmount, displayCurrency)}`}
                                             style={{ fontSize: 16, fontWeight: '900', color: isDark ? '#f87171' : '#dc2626' }}
                                         />
-                                        {showOriginal && (
+                                        {showEquivalent && equivalentText && (
                                             <AnimatedValueText
-                                                text={`${expense.amount} ${expense.currency}`}
+                                                text={equivalentText}
                                                 style={{ fontSize: 10, fontWeight: '700', color: isDark ? '#f87171' : '#dc2626', opacity: 0.5, marginTop: 1 }}
                                             />
                                         )}
@@ -94,18 +105,11 @@ export function ExchangeSpendingTimeline({
                                         gap: 6,
                                     }}
                                 >
-                                    <AnimatedValueText
-                                        text={`Bal: ${MathUtils.formatCurrency(balanceAfterHome, homeCurrency)}`}
-                                        style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#aaa' : '#888' }}
-                                    />
-                                    {balanceInWallet !== null && (
-                                        <>
-                                            <Text style={{ fontSize: 10, color: isDark ? '#555' : '#ccc' }}>·</Text>
-                                            <AnimatedValueText
-                                                text={`~${MathUtils.formatCurrency(balanceInWallet, walletCurrency)}`}
-                                                style={{ fontSize: 10, fontWeight: '600', color: isDark ? '#888' : '#aaa' }}
-                                            />
-                                        </>
+                                    {balanceText && (
+                                        <AnimatedValueText
+                                            text={balanceText}
+                                            style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#aaa' : '#888' }}
+                                        />
                                     )}
                                 </View>
                             </View>

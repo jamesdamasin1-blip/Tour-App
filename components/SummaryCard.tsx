@@ -13,7 +13,7 @@ interface SummaryCardProps {
 }
 
 export const SummaryCard = React.memo(({ spentAmount, totalAmount }: SummaryCardProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const router = useRouter();
     const scaleAnim = useRef(new Animated.Value(1)).current;

@@ -1,7 +1,6 @@
 /**
- * LOCAL DATABASE — Source of truth for offline-first operation.
- * Uses expo-sqlite for persistent, transactional storage.
- * All financial data lives here; Zustand reads from this on hydration.
+ * Local persistence for cloud-synced cache state and device-only metadata.
+ * Uses expo-sqlite for persistent, transactional storage on native devices.
  */
 import * as SQLite from 'expo-sqlite';
 

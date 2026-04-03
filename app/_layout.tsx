@@ -1,5 +1,5 @@
 import { DefaultTheme, DarkTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, usePathname, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
 import { useEffect } from 'react';
@@ -10,6 +10,9 @@ import { Platform } from 'react-native';
 import { initializeDB } from '@/src/storage/localDB';
 import { useNetworkStatus } from '@/src/hooks/useNetworkStatus';
 import { WalletErrorModal } from '@/components/WalletErrorModal';
+import { GlobalInboxBridge } from '@/components/GlobalInboxBridge';
+import { useRealtimeSync } from '@/src/hooks/useRealtimeSync';
+import { syncTrace, traceDuration } from '@/src/sync/debug';
 
 import '../global.css';
 
@@ -24,8 +27,10 @@ if (Platform.OS !== 'web') {
 
 // Set nav theme background to match the MeshBackground base color
 export default function RootLayout() {
-  const { theme } = useStore();
+  const theme = useStore(state => state.theme);
   const isDark = theme === 'dark';
+  const pathname = usePathname();
+  const segments = useSegments();
 
   const AppTheme = {
     ...(isDark ? DarkTheme : DefaultTheme),
@@ -40,18 +45,40 @@ export default function RootLayout() {
 
   // Start network monitoring — triggers sync on reconnection
   useNetworkStatus();
+  useRealtimeSync();
 
   useEffect(() => {
     // Hide splash screen when root layout is mounted
     SplashScreen.hideAsync();
+  }, []);
 
+  useEffect(() => {
+    syncTrace('App', 'root_layout_ready', { theme });
+  }, [theme]);
+
+  useEffect(() => {
     // Periodically fetch currency rates
-    CurrencyUtils.fetchRates(currencyRates, cacheRates).catch(console.error);
+    const startedAt = Date.now();
+    CurrencyUtils.fetchRates(currencyRates, cacheRates)
+      .then(() => traceDuration('App', 'currency_rates_fetch_done', startedAt))
+      .catch(error => {
+        traceDuration('App', 'currency_rates_fetch_failed', startedAt, {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        console.error(error);
+      });
   }, [cacheRates, currencyRates]);
 
   useEffect(() => {
     SystemUI.setBackgroundColorAsync(isDark ? '#1A1C18' : '#F2F0E8').catch(console.error);
   }, [isDark]);
+
+  useEffect(() => {
+    syncTrace('Navigation', 'route_change', {
+      pathname,
+      segments,
+    });
+  }, [pathname, segments]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: isDark ? '#1A1C18' : '#F2F0E8' }}>
@@ -68,6 +95,7 @@ export default function RootLayout() {
           <Stack.Screen name="+not-found" options={{ title: 'Oops!' }} />
         </Stack>
         <WalletErrorModal />
+        <GlobalInboxBridge />
       </ThemeProvider>
     </GestureHandlerRootView>
   );

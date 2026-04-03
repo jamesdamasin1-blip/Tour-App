@@ -1,8 +1,8 @@
 /**
- * SYNC ENGINE v2 — Cloud-first cache hydrator plus legacy queue drainer.
+ * SYNC ENGINE v2 — Cloud-first cache hydrator with historic queue recovery.
  *
  * Strategy:
- * 1. Drain any historic/device-local queue events to Supabase.
+ * 1. Drain any historic pending queue events that predate cloud-first writes.
  * 2. Pull remote updates and hydrate the local cache.
  * 3. Preserve fresher cloud-visible local entities during merge races.
  * 4. Detect remote soft-deletes and remove them locally.
@@ -20,7 +20,7 @@ import { mapExpenseFromDb } from '../mappers/expense.mapper';
 import { mapWalletFromDb, mapFundingLotFromDb } from '../mappers/wallet.mapper';
 import type { AppState } from '../store/useStore';
 import { getStoreState, setStoreState } from '../store/storeBridge';
-import { syncTrace, summarizeTrip, summarizeWallets } from './debug';
+import { syncTrace, summarizeTrip, summarizeWallets, traceDuration } from './debug';
 import { isRecoverableSyncError, logSyncIssue, pushPendingChanges } from './legacyQueueDrainer';
 
 type SyncStatus = 'idle' | 'syncing' | 'error';
@@ -33,7 +33,7 @@ let _lastSyncFinishedAt = 0;
 const _tripRefetchTokens = new Map<string, number>();
 // Realtime subscriptions handle the normal collaborative path.
 // Keep periodic full sync as a slower safety net for missed events/reconnect gaps.
-const SYNC_INTERVAL = 30_000;
+const SYNC_INTERVAL = 60_000;
 const MIN_SYNC_GAP_MS = 3_000;
 const SYNC_DEBUG_LOGS = false;
 const SYNC_RUNTIME_LOGS = false;
@@ -41,8 +41,8 @@ const SYNC_RUNTIME_LOGS = false;
 export const getSyncStatus = () => _syncStatus;
 
 /**
- * Drain queued legacy mutations without running a full pull cycle.
- * Used as a recovery path for older pending events and explicit cache-only flows.
+ * Drain historic queued mutations without running a full pull cycle.
+ * Used as a recovery path for older pending events.
  */
 export const pushNow = async (): Promise<number> => {
     if (_syncRunning) {
@@ -74,6 +74,8 @@ export const pushNow = async (): Promise<number> => {
 
 /** Main cache refresh loop — called when online and authenticated. */
 export const runSync = async (): Promise<{ pushed: number; pulled: number }> => {
+    const startedAt = Date.now();
+    syncTrace('SyncEngine', 'run_start');
     // If a sync is already running, just mark that we want another one after.
     // This handles the race condition where a mutation happens while we are pulling remote updates.
     if (_syncRunning) {
@@ -81,6 +83,7 @@ export const runSync = async (): Promise<{ pushed: number; pulled: number }> => 
         if (SYNC_DEBUG_LOGS) {
             console.log('[SyncEngine] Queued follow-up sync');
         }
+        traceDuration('SyncEngine', 'run_queued', startedAt);
         return { pushed: 0, pulled: 0 };
     }
 
@@ -89,6 +92,9 @@ export const runSync = async (): Promise<{ pushed: number; pulled: number }> => 
         if (SYNC_DEBUG_LOGS) {
             console.log(`[SyncEngine] Skipping duplicate sync within ${MIN_SYNC_GAP_MS}ms window`);
         }
+        traceDuration('SyncEngine', 'run_skipped_duplicate', startedAt, {
+            lastSyncFinishedAt: _lastSyncFinishedAt,
+        });
         return { pushed: 0, pulled: 0 };
     }
     
@@ -100,6 +106,15 @@ export const runSync = async (): Promise<{ pushed: number; pulled: number }> => 
     try {
         const auth = await getAuthState();
         if (!auth.isAuthenticated || !auth.userId) {
+            traceDuration('SyncEngine', 'run_skipped_unauthenticated', startedAt);
+            return { pushed: 0, pulled: 0 };
+        }
+
+        const activeMutationCount = Object.keys(getStoreState<AppState>().tripMutationCounts || {}).length;
+        if (activeMutationCount > 0) {
+            traceDuration('SyncEngine', 'run_skipped_mutation_inflight', startedAt, {
+                activeMutationCount,
+            });
             return { pushed: 0, pulled: 0 };
         }
 
@@ -121,7 +136,14 @@ export const runSync = async (): Promise<{ pushed: number; pulled: number }> => 
         if (SYNC_DEBUG_LOGS) {
             console.log(`[SyncEngine] Done — totalPushed=${pushedTotal}, totalPulled=${pulledTotal}`);
         }
+        traceDuration('SyncEngine', 'run_done', startedAt, {
+            pushedTotal,
+            pulledTotal,
+        });
     } catch (err) {
+        traceDuration('SyncEngine', 'run_failed', startedAt, {
+            message: err instanceof Error ? err.message : String(err),
+        });
         logSyncIssue('[SyncEngine] Sync failed:', err);
         _syncStatus = isRecoverableSyncError(err) ? 'idle' : 'error';
     } finally {
@@ -218,8 +240,7 @@ const getWalletTimestamp = (wallet: any): number => {
     return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
-const mergeEmbeddedWallet = (wallet: any, trip?: any, localWallet?: any): any => {
-    const tripTimestamp = getWalletTimestamp(trip);
+const mergeEmbeddedWallet = (wallet: any, _trip?: any, localWallet?: any): any => {
     const walletTimestamp = getWalletTimestamp(wallet);
     const localTimestamp = getWalletTimestamp(localWallet);
 
@@ -231,9 +252,28 @@ const mergeEmbeddedWallet = (wallet: any, trip?: any, localWallet?: any): any =>
         createdAt: wallet?.createdAt ?? localWallet?.createdAt ?? Date.now(),
         lots: wallet?.lots ?? localWallet?.lots ?? [],
         version: getWalletVersion(wallet) || getWalletVersion(localWallet) || 1,
-        // Embedded wallets inside trips.wallets do not always bump their own timestamp/version
-        // when the parent trip mirrors a wallet-lot change, so use the trip row freshness too.
-        lastModified: Math.max(walletTimestamp, tripTimestamp, localTimestamp, 0) || Date.now(),
+        lastModified: Math.max(walletTimestamp, localTimestamp, 0) || Date.now(),
+    };
+};
+
+const mergeResolvedWallet = (embeddedWallet: any, tableWallet: any, localWallet: any): any => {
+    const embeddedTimestamp = getWalletTimestamp(embeddedWallet);
+    const tableTimestamp = getWalletTimestamp(tableWallet);
+    const localTimestamp = getWalletTimestamp(localWallet);
+    const embeddedVersion = getWalletVersion(embeddedWallet);
+    const tableVersion = getWalletVersion(tableWallet);
+    const localVersion = getWalletVersion(localWallet);
+
+    return {
+        ...(localWallet || {}),
+        ...(embeddedWallet || {}),
+        ...(tableWallet || {}),
+        tripId: tableWallet?.tripId ?? embeddedWallet?.tripId ?? localWallet?.tripId,
+        country: embeddedWallet?.country ?? tableWallet?.country ?? localWallet?.country ?? '',
+        createdAt: embeddedWallet?.createdAt ?? tableWallet?.createdAt ?? localWallet?.createdAt ?? Date.now(),
+        lots: tableWallet?.lots ?? embeddedWallet?.lots ?? localWallet?.lots ?? [],
+        version: Math.max(embeddedVersion, tableVersion, localVersion, 1),
+        lastModified: Math.max(embeddedTimestamp, tableTimestamp, localTimestamp, 0) || Date.now(),
     };
 };
 
@@ -264,40 +304,16 @@ const resolveTripWallets = (trip: any, walletRows: any[], localTrip?: any): any[
     return orderedIds.map(id => {
         const embeddedWallet = embeddedMap.get(id);
         const tableWallet = walletRowMap.get(id);
+        const localWallet = localWallets.find((wallet: any) => wallet.id === id);
 
         if (!embeddedWallet) return tableWallet;
         if (!tableWallet) return embeddedWallet;
-
-        const embeddedVersion = getWalletVersion(embeddedWallet);
-        const tableVersion = getWalletVersion(tableWallet);
-        if (embeddedVersion > tableVersion) {
-            if (SYNC_RUNTIME_LOGS) {
-                console.log(
-                    `[SyncEngine] Using mirrored trip wallet ${id} (trip v${embeddedVersion} > table v${tableVersion})`
-                );
-            }
-            return embeddedWallet;
-        }
-        if (tableVersion > embeddedVersion) {
-            return tableWallet;
-        }
-
-        const embeddedTimestamp = getWalletTimestamp(embeddedWallet);
-        const tableTimestamp = getWalletTimestamp(tableWallet);
-        if (embeddedTimestamp > tableTimestamp) {
-            if (SYNC_RUNTIME_LOGS) {
-                console.log(
-                    `[SyncEngine] Using mirrored trip wallet ${id} (trip ts${embeddedTimestamp} > table ts${tableTimestamp})`
-                );
-            }
-            return embeddedWallet;
-        }
-
-        return tableWallet;
+        return mergeResolvedWallet(embeddedWallet, tableWallet, localWallet);
     }).filter(Boolean);
 };
 
 const applyCloudTripBundle = (data: CloudTripBundle): void => {
+    const startedAt = Date.now();
     const { trip, wallets = [], activities = [], expenses = [] } = data;
     if (!trip?.id) return;
 
@@ -349,6 +365,12 @@ const applyCloudTripBundle = (data: CloudTripBundle): void => {
             ...mappedFundingLots,
         ],
     }));
+    traceDuration('SyncEngine', 'apply_trip_bundle_done', startedAt, {
+        tripId: trip.id,
+        activityCount: hydratedActivities.length,
+        expenseCount: mappedExpenses.length,
+        fundingLotCount: mappedFundingLots.length,
+    });
 };
 
 // ─── Pull-side mappers (snake_case → camelCase, delegated to mappers/) ──────
@@ -356,6 +378,7 @@ const applyCloudTripBundle = (data: CloudTripBundle): void => {
 
 /** Pull remote changes — version-aware, soft-delete aware */
 const applyCloudSnapshot = (snapshot: CloudSnapshot): void => {
+    const startedAt = Date.now();
     const state = getStoreState<AppState>();
     syncTrace('SyncEngine', 'apply_snapshot_start', {
         tripCount: snapshot.trips.length,
@@ -435,9 +458,17 @@ const applyCloudSnapshot = (snapshot: CloudSnapshot): void => {
             ...mergedFundingLots,
         ],
     });
+    traceDuration('SyncEngine', 'apply_snapshot_done', startedAt, {
+        tripCount: mappedTrips.length,
+        preservedTripCount: preservedTrips.length,
+        activityCount: mappedActivities.length,
+        expenseCount: mergedExpenses.length,
+        fundingLotCount: mergedFundingLots.length,
+    });
 };
 
 const fetchAccessibleCloudSnapshot = async (auth: AuthState): Promise<CloudSnapshot> => {
+    const startedAt = Date.now();
     const memberFilter = `[{"userId":"${auth.userId}"}]`;
     const { data: remoteTrips, error: tripErr } = await supabase
         .from('trips')
@@ -468,6 +499,9 @@ const fetchAccessibleCloudSnapshot = async (auth: AuthState): Promise<CloudSnaps
     }
 
     if (tripIds.length === 0) {
+        traceDuration('SyncEngine', 'fetch_accessible_snapshot_empty', startedAt, {
+            userId: auth.userId,
+        });
         return { trips: [], wallets: [], activities: [], expenses: [], fundingLots: [] };
     }
 
@@ -491,6 +525,14 @@ const fetchAccessibleCloudSnapshot = async (auth: AuthState): Promise<CloudSnaps
     syncTrace('SyncEngine', 'fetch_accessible_snapshot', {
         userId: auth.userId,
         tripIds,
+        tripCount: trips.length,
+        walletCount: (remoteWallets || []).length,
+        activityCount: (remoteActivities || []).length,
+        expenseCount: (remoteExpenses || []).length,
+        fundingLotCount: (remoteFundingLots || []).length,
+    });
+    traceDuration('SyncEngine', 'fetch_accessible_snapshot_done', startedAt, {
+        userId: auth.userId,
         tripCount: trips.length,
         walletCount: (remoteWallets || []).length,
         activityCount: (remoteActivities || []).length,
@@ -695,10 +737,19 @@ export const legacyPullRemoteUpdates = async (auth: AuthState): Promise<number> 
 };
 
 const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
+    const startedAt = Date.now();
     syncTrace('SyncEngine', 'pull_remote_updates_start', { userId: auth.userId });
     const snapshot = await fetchAccessibleCloudSnapshot(auth);
     applyCloudSnapshot(snapshot);
     syncTrace('SyncEngine', 'pull_remote_updates_done', {
+        userId: auth.userId,
+        tripCount: snapshot.trips.length,
+        walletCount: snapshot.wallets.length,
+        activityCount: snapshot.activities.length,
+        expenseCount: snapshot.expenses.length,
+        fundingLotCount: snapshot.fundingLots.length,
+    });
+    traceDuration('SyncEngine', 'pull_remote_updates_cycle_done', startedAt, {
         userId: auth.userId,
         tripCount: snapshot.trips.length,
         walletCount: snapshot.wallets.length,
@@ -719,6 +770,7 @@ const pullRemoteUpdates = async (auth: AuthState): Promise<number> => {
 /** Start periodic sync (background) */
 export const startSyncLoop = () => {
     if (_syncTimer) return;
+    syncTrace('SyncEngine', 'loop_started', { intervalMs: SYNC_INTERVAL });
     _syncTimer = setInterval(() => {
         runSync().catch(console.error);
     }, SYNC_INTERVAL);
@@ -729,10 +781,12 @@ export const stopSyncLoop = () => {
     if (_syncTimer) {
         clearInterval(_syncTimer);
         _syncTimer = null;
+        syncTrace('SyncEngine', 'loop_stopped');
     }
 };
 
 export const refetchAccessibleCloudState = async (): Promise<void> => {
+    const startedAt = Date.now();
     const auth = await getAuthState();
     if (!auth.isAuthenticated || !auth.userId) return;
 
@@ -740,6 +794,10 @@ export const refetchAccessibleCloudState = async (): Promise<void> => {
     const snapshot = await fetchAccessibleCloudSnapshot(auth);
     applyCloudSnapshot(snapshot);
     syncTrace('SyncEngine', 'refetch_accessible_state_done', { userId: auth.userId });
+    traceDuration('SyncEngine', 'refetch_accessible_state_cycle_done', startedAt, {
+        userId: auth.userId,
+        tripCount: snapshot.trips.length,
+    });
 };
 
 /**
@@ -747,6 +805,7 @@ export const refetchAccessibleCloudState = async (): Promise<void> => {
  * Fetch a full trip bundle directly from the DB and replace local cache state.
  */
 export const refetchTripActivities = async (tripId: string): Promise<void> => {
+    const startedAt = Date.now();
     const token = (_tripRefetchTokens.get(tripId) ?? 0) + 1;
     _tripRefetchTokens.set(tripId, token);
     syncTrace('SyncEngine', 'refetch_trip_start', { tripId, token });
@@ -833,5 +892,13 @@ export const refetchTripActivities = async (tripId: string): Promise<void> => {
         activities: remoteActivities || [],
         expenses: remoteExpenses || [],
         fundingLots: remoteFundingLots || [],
+    });
+    traceDuration('SyncEngine', 'refetch_trip_done', startedAt, {
+        tripId,
+        token,
+        activityCount: (remoteActivities || []).length,
+        expenseCount: (remoteExpenses || []).length,
+        walletCount: (remoteWallets || []).length,
+        fundingLotCount: (remoteFundingLots || []).length,
     });
 };

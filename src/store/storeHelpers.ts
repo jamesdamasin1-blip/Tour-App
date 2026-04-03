@@ -4,7 +4,7 @@ import { supabase } from '../utils/supabase';
 
 // ─── Helpers ───────────────────────────────────────────────────────
 
-/** Cache-only helper retained for device-local trip hiding after a successful cloud leave. */
+/** Persist a device-local hide flag after a successful cloud leave. */
 export const persistLocalTripHide = (id: string, data: any) => {
     try {
         persistTripHideLocally(id, data);
@@ -107,43 +107,6 @@ export const recomputeWalletSpent = (
         ...w,
         spentAmount: spentByWallet.get(w.id) || 0,
     }));
-};
-
-// ─── Schema validation for importTrip ─────────────────────────────
-
-const isValidString = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length < 500;
-const isValidNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-const isValidId = (v: unknown): v is string => typeof v === 'string' && v.length >= 8 && v.length <= 64;
-
-const VALID_CATEGORIES: Set<string> = new Set(['Food', 'Transport', 'Hotel', 'Sightseeing', 'Other']);
-
-export const validateImportedTrip = (data: any): boolean => {
-    if (!data || typeof data !== 'object') return false;
-    if (!isValidId(data.id)) return false;
-    if (!isValidString(data.title)) return false;
-    if (!isValidNumber(data.startDate) || !isValidNumber(data.endDate)) return false;
-    if (!isValidString(data.homeCurrency) || data.homeCurrency.length !== 3) return false;
-    if (!isValidNumber(data.lastModified)) return false;
-    if (!Array.isArray(data.wallets)) return false;
-
-    for (const w of data.wallets) {
-        if (!isValidId(w.id)) return false;
-        if (!isValidString(w.currency) || w.currency.length !== 3) return false;
-        if (!isValidNumber(w.totalBudget) || w.totalBudget < 0) return false;
-    }
-
-    if (data.activities && !Array.isArray(data.activities)) return false;
-    if (data.activities) {
-        for (const a of data.activities) {
-            if (!isValidId(a.id)) return false;
-            if (!isValidString(a.title)) return false;
-            if (!VALID_CATEGORIES.has(a.category)) return false;
-            if (!isValidNumber(a.date)) return false;
-            if (!isValidNumber(a.allocatedBudget) || a.allocatedBudget < 0) return false;
-        }
-    }
-
-    return true;
 };
 
 /** Re-export supabase for slices that need it */

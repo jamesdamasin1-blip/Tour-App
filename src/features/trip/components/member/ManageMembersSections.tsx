@@ -1,6 +1,5 @@
 import { RippleButton } from '@/components/RippleButton';
 import { Feather } from '@expo/vector-icons';
-import QRCode from 'react-native-qrcode-svg';
 import React from 'react';
 import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
@@ -110,63 +109,29 @@ export function ManageMembersInviteSection({
     isAuthenticated,
     isDark,
     isSending,
-    qrPayload,
     onBack,
     onChangeEmail,
     onInviteAnother,
     onSelectMode,
     onSelectRole,
     onSendInvite,
-    onShareCode,
 }: {
     inviteEmail: string;
     inviteError: string;
     inviteRole: 'editor' | 'viewer';
     inviteSent: boolean;
-    isAdding: false | 'qr' | 'code' | 'google';
+    isAdding: false | 'email';
     isAuthenticated: boolean;
     isDark: boolean;
     isSending: boolean;
-    qrPayload: string;
     onBack: () => void;
     onChangeEmail: (value: string) => void;
     onInviteAnother: () => void;
-    onSelectMode: (mode: 'qr' | 'code' | 'google') => void;
+    onSelectMode: (mode: 'email') => void;
     onSelectRole: (role: 'editor' | 'viewer') => void;
     onSendInvite: () => void;
-    onShareCode: () => void;
 }) {
-    if (isAdding === 'qr') {
-        return (
-            <View style={{ alignItems: 'center', marginTop: 8 }}>
-                <Text style={{ fontSize: 10, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 12 }}>
-                    {'Ask them to scan this QR from the "+" menu'}
-                </Text>
-                <View style={{ padding: 12, backgroundColor: '#FFF', borderRadius: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 3 }}>
-                    <QRCode value={qrPayload || 'empty'} size={140} color="#111827" backgroundColor="transparent" />
-                </View>
-                <TouchableOpacity onPress={onBack} style={{ marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(0,0,0,0.1)' }}>
-                    <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#9EB294' : '#6B7280', letterSpacing: 0.5 }}>DONE</Text>
-                </TouchableOpacity>
-            </View>
-        );
-    }
-
-    if (isAdding === 'code') {
-        return (
-            <View style={{ alignItems: 'center', marginTop: 8 }}>
-                <TouchableOpacity onPress={onShareCode} style={{ paddingVertical: 12, paddingHorizontal: 20, borderRadius: 14, backgroundColor: isDark ? '#B2C4AA' : '#5D6D54', flexDirection: 'row', alignItems: 'center' }}>
-                    <Feather name="share" size={14} color={isDark ? '#1A1C18' : '#fff'} style={{ marginRight: 6 }} />
-                    <Text style={{ fontSize: 11, fontWeight: '800', color: isDark ? '#1A1C18' : '#fff', letterSpacing: 0.5 }}>SHARE INVITE CODE</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={onBack} style={{ marginTop: 10, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(0,0,0,0.1)' }}>
-                    <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#9EB294' : '#6B7280', letterSpacing: 0.5 }}>BACK</Text>
-                </TouchableOpacity>
-            </View>
-        );
-    }
-
-    if (isAdding === 'google') {
+    if (isAdding === 'email') {
         return (
             <View style={{ marginTop: 8 }}>
                 {!isAuthenticated ? (
@@ -174,7 +139,7 @@ export function ManageMembersInviteSection({
                         <Feather name="lock" size={28} color={isDark ? '#9EB294' : '#6B7280'} />
                         <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#F2F0E8' : '#111827', marginTop: 10, textAlign: 'center' }}>Sign in required</Text>
                         <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginTop: 4 }}>
-                            Sign in to send email invites. Use QR or invite code instead.
+                            Sign in to send cloud invites.
                         </Text>
                     </View>
                 ) : inviteSent ? (
@@ -192,11 +157,11 @@ export function ManageMembersInviteSection({
                     </View>
                 ) : (
                     <>
-                        <Text style={{ fontSize: 10, color: isDark ? '#9EB294' : '#6B7280', marginBottom: 8 }}>Enter their Google account email.</Text>
+                        <Text style={{ fontSize: 10, color: isDark ? '#9EB294' : '#6B7280', marginBottom: 8 }}>Enter the email tied to their Aliqual account.</Text>
                         <TextInput
                             value={inviteEmail}
                             onChangeText={onChangeEmail}
-                            placeholder="email@gmail.com"
+                            placeholder="email@example.com"
                             placeholderTextColor={isDark ? '#6B7280' : '#9CA3AF'}
                             autoFocus
                             keyboardType="email-address"
@@ -229,17 +194,9 @@ export function ManageMembersInviteSection({
 
     return (
         <View style={{ marginTop: 8, gap: 6 }}>
-            <TouchableOpacity onPress={() => onSelectMode('qr')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 14, backgroundColor: isDark ? '#B2C4AA' : '#5D6D54' }}>
-                <Feather name="maximize" size={14} color={isDark ? '#1A1C18' : '#fff'} style={{ marginRight: 6 }} />
-                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#1A1C18' : '#fff', letterSpacing: 1 }}>INVITE VIA QR</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => onSelectMode('code')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: isDark ? 'rgba(158,178,148,0.25)' : 'rgba(93,109,84,0.2)' }}>
-                <Feather name="hash" size={14} color={isDark ? '#9EB294' : '#5D6D54'} style={{ marginRight: 6 }} />
-                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#9EB294' : '#5D6D54', letterSpacing: 1 }}>SHARE INVITE CODE</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => onSelectMode('google')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: isDark ? 'rgba(158,178,148,0.2)' : 'rgba(93,109,84,0.15)', backgroundColor: isDark ? 'rgba(158,178,148,0.05)' : 'rgba(93,109,84,0.04)' }}>
+            <TouchableOpacity onPress={() => onSelectMode('email')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 14, backgroundColor: isDark ? '#B2C4AA' : '#5D6D54' }}>
                 <Feather name="mail" size={14} color={isDark ? '#9EB294' : '#5D6D54'} style={{ marginRight: 6 }} />
-                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#9EB294' : '#5D6D54', letterSpacing: 1 }}>ADD VIA GOOGLE</Text>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: isDark ? '#1A1C18' : '#fff', letterSpacing: 1 }}>INVITE BY EMAIL</Text>
             </TouchableOpacity>
         </View>
     );

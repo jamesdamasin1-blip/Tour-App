@@ -1,6 +1,6 @@
 /**
- * Legacy sync queue for cache-only/device-only writes and draining historic
- * pending events created before the cloud-first migration.
+ * Historic sync queue retained only to drain pending events created before the
+ * cloud-first write path became authoritative.
  *
  * Shared collaborative writes should go directly to Supabase RPCs first.
  */
@@ -18,7 +18,7 @@ export interface SyncEvent {
     status: 'pending' | 'processing' | 'failed' | 'done';
 }
 
-/** Enqueue a legacy mutation for deferred sync. */
+/** Enqueue a historic recovery mutation for deferred sync. */
 export const enqueueSync = (
     type: SyncEvent['type'],
     tableName: string,
@@ -46,7 +46,7 @@ export const enqueueSync = (
     return event.id;
 };
 
-/** Get all pending legacy events, oldest first. */
+/** Get all pending recovery events, oldest first. */
 export const getPendingEvents = (): SyncEvent[] => {
     const db = getDB();
     return db.getAllSync<SyncEvent>(
@@ -54,7 +54,7 @@ export const getPendingEvents = (): SyncEvent[] => {
     );
 };
 
-/** Get failed legacy events eligible for retry (max 5 retries). */
+/** Get failed recovery events eligible for retry (max 5 retries). */
 export const getRetryableEvents = (): SyncEvent[] => {
     const db = getDB();
     return db.getAllSync<SyncEvent>(
@@ -62,19 +62,19 @@ export const getRetryableEvents = (): SyncEvent[] => {
     );
 };
 
-/** Mark a legacy queue event as processing (lock). */
+/** Mark a recovery queue event as processing (lock). */
 export const markProcessing = (eventId: string) => {
     const db = getDB();
     db.runSync(`UPDATE sync_queue SET status = 'processing' WHERE id = ?`, [eventId]);
 };
 
-/** Mark a legacy queue event as done (successfully synced). */
+/** Mark a recovery queue event as done (successfully synced). */
 export const markDone = (eventId: string) => {
     const db = getDB();
     db.runSync(`UPDATE sync_queue SET status = 'done' WHERE id = ?`, [eventId]);
 };
 
-/** Mark a legacy queue event as failed with retry increment. */
+/** Mark a recovery queue event as failed with retry increment. */
 export const markFailed = (eventId: string) => {
     const db = getDB();
     db.runSync(
@@ -90,7 +90,7 @@ export const pruneCompletedEvents = () => {
     db.runSync(`DELETE FROM sync_queue WHERE status = 'done' AND timestamp < ?`, [cutoff]);
 };
 
-/** Get queue stats for legacy/offline diagnostics UI. */
+/** Get queue stats for diagnostics UI. */
 export const getQueueStats = (): { pending: number; failed: number; total: number } => {
     const db = getDB();
     const pending = db.getFirstSync<{ c: number }>(`SELECT COUNT(*) as c FROM sync_queue WHERE status = 'pending'`);

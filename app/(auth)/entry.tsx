@@ -17,7 +17,6 @@ import { AuthLoadingOverlay } from '@/components/AuthLoadingOverlay';
 import { useTheme } from '@/src/hooks/useTheme';
 import { signInWithGoogle, onAuthStateChange } from '@/src/auth/googleAuth';
 import { bootstrapAuthState } from '@/src/auth/authRuntime';
-import { setSyncMeta } from '@/src/storage/localDB';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AuthEntryScreen() {
@@ -109,12 +108,6 @@ export default function AuthEntryScreen() {
         // Navigate to unified password screen — no email enumeration check.
         // The password screen handles both login and "no account" cases.
         router.push({ pathname: '/(auth)/password', params: { email: trimmed } });
-    };
-
-    const handleOffline = () => {
-        setSyncMeta('skippedAuth', 'true');
-        setTransitioning(true);
-        setTimeout(() => router.replace('/(tabs)'), 1200);
     };
 
     if (transitioning) {
@@ -226,18 +219,6 @@ export default function AuthEntryScreen() {
                             <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
                         ) : null}
                     </GlassView>
-
-                    {/* Offline */}
-                    <TouchableOpacity
-                        style={styles.offlineButton}
-                        onPress={handleOffline}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons name="cloud-offline-outline" size={16} color={colors.subtext} />
-                        <Text style={[styles.offlineText, { color: colors.subtext }]}>
-                            Continue Offline
-                        </Text>
-                    </TouchableOpacity>
                 </View>
             </KeyboardAvoidingView>
         </MeshBackground>
@@ -329,16 +310,6 @@ const styles = StyleSheet.create({
         fontSize: 13,
         textAlign: 'center',
         marginTop: 12,
-    },
-    offlineButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: 24,
-        gap: 6,
-    },
-    offlineText: {
-        fontSize: 14,
     },
     themeToggleContainer: {
         position: 'absolute',

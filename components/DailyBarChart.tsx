@@ -39,7 +39,7 @@ export const DailyBarChart = React.memo(({
     data, averageSpent, averageBudget, totalBudget, selectedDay, onSelectDay,
     breakdownMode, onBreakdownChange, spendingTotals,
 }: DailyBarChartProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     const maxVal = useMemo(() => {
@@ -115,7 +115,13 @@ export const DailyBarChart = React.memo(({
                         {data.map((item) => {
                             const isSelected = item.date === selectedDay;
                             const isOverBudget = item.spent > item.budget && item.budget > 0;
-                            const isUnderBudget = item.budget >= item.spent && item.budget > 0;
+                            const isUnderBudget = !isOverBudget && item.budget >= item.spent && item.budget > 0;
+                            const selectedAccentTextClass = isOverBudget
+                                ? 'text-[#ef4444]'
+                                : (isDark ? 'text-[#B2C4AA]' : 'text-[#5D6D54]');
+                            const selectedBorderColor = isSelected
+                                ? (isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54'))
+                                : (isDark ? '#4A5046' : '#e5e7eb');
 
                             return (
                                 <TouchableOpacity
@@ -143,7 +149,7 @@ export const DailyBarChart = React.memo(({
                                             style={{
                                                 height: '100%',
                                                 borderWidth: isSelected ? 1.5 : 0.5,
-                                                borderColor: isSelected ? (isDark ? '#B2C4AA' : '#5D6D54') : (isDark ? '#4A5046' : '#e5e7eb'),
+                                                borderColor: selectedBorderColor,
                                                 backgroundColor: 'transparent'
                                             }}
                                         >
@@ -189,10 +195,10 @@ export const DailyBarChart = React.memo(({
 
                                     {/* X-Axis Labels */}
                                     <View className="mt-3 items-center">
-                                        <Text className={`text-[12px] font-black text-center ${isSelected ? (isDark ? 'text-[#F2F0E8]' : 'text-[#5D6D54]') : (isDark ? 'text-[#9EB294]' : 'text-gray-500')}`} style={{ lineHeight: 14 }}>
+                                        <Text className={`text-[12px] font-black text-center ${isSelected ? (isOverBudget ? 'text-[#FCA5A5]' : (isDark ? 'text-[#F2F0E8]' : 'text-[#5D6D54]')) : (isDark ? 'text-[#9EB294]' : 'text-gray-500')}`} style={{ lineHeight: 14 }}>
                                             ₱{item.spent.toLocaleString()}
                                         </Text>
-                                        <Text className={`text-[10px] font-bold text-center mt-0.5 ${isSelected ? (isDark ? 'text-[#B2C4AA]' : 'text-[#5D6D54]') : (isDark ? 'text-[#9EB294]/60' : 'text-gray-400')}`} style={{ lineHeight: 12 }}>
+                                        <Text className={`text-[10px] font-bold text-center mt-0.5 ${isSelected ? selectedAccentTextClass : (isDark ? 'text-[#9EB294]/60' : 'text-gray-400')}`} style={{ lineHeight: 12 }}>
                                             {item.shortLabel}
                                         </Text>
                                         {isOverBudget && (

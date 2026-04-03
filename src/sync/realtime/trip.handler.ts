@@ -4,6 +4,50 @@ import { mapTripFromDb } from '../../mappers/trip.mapper';
 import type { StateSnapshot, HandlerResult } from './types';
 import { syncTrace, summarizeRealtimePayload } from '../debug';
 
+const getWalletVersion = (wallet: any): number => {
+    const version = Number(wallet?.version ?? 0);
+    return Number.isFinite(version) ? version : 0;
+};
+
+const getWalletTimestamp = (wallet: any): number => {
+    const timestamp = Number(
+        wallet?.lastModified ??
+        wallet?.updated_at ??
+        wallet?.updatedAt ??
+        0
+    );
+    return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const mergeTripRealtimeWallets = (incomingWallets: any[], existingWallets: any[]) => {
+    const existingMap = new Map(existingWallets.map(wallet => [wallet.id, wallet]));
+
+    return incomingWallets.map(incomingWallet => {
+        const existingWallet = existingMap.get(incomingWallet.id);
+        if (!existingWallet) return incomingWallet;
+
+        const incomingVersion = getWalletVersion(incomingWallet);
+        const existingVersion = getWalletVersion(existingWallet);
+        const incomingTimestamp = getWalletTimestamp(incomingWallet);
+        const existingTimestamp = getWalletTimestamp(existingWallet);
+        const preferExisting = existingVersion > incomingVersion
+            || (existingVersion === incomingVersion && existingTimestamp > incomingTimestamp);
+
+        const preferred = preferExisting ? existingWallet : incomingWallet;
+        const fallback = preferExisting ? incomingWallet : existingWallet;
+
+        return {
+            ...fallback,
+            ...preferred,
+            country: incomingWallet?.country ?? existingWallet?.country ?? '',
+            createdAt: incomingWallet?.createdAt ?? existingWallet?.createdAt ?? Date.now(),
+            lots: preferred?.lots ?? fallback?.lots ?? [],
+            version: Math.max(incomingVersion, existingVersion, 1),
+            lastModified: Math.max(incomingTimestamp, existingTimestamp, 0) || Date.now(),
+        };
+    });
+};
+
 export function handleTripChange(payload: any, state: StateSnapshot): HandlerResult {
     if (isSelfEmitted(payload)) {
         syncTrace('TripRT', 'skip_self_emitted', summarizeRealtimePayload(payload));
@@ -51,10 +95,13 @@ export function handleTripChange(payload: any, state: StateSnapshot): HandlerRes
     }
 
     const existingTrip = state.trips.find(t => t.id === incoming.id);
+    const mergedWallets = 'wallets' in incoming
+        ? mergeTripRealtimeWallets(incoming.wallets || [], existingTrip?.wallets || [])
+        : existingTrip?.wallets;
     const nextTrip = {
         ...(existingTrip || {}),
         ...incoming,
-        wallets: 'wallets' in incoming ? incoming.wallets : existingTrip?.wallets,
+        wallets: mergedWallets,
         isCloudSynced: true,
     };
 

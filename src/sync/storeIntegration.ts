@@ -1,8 +1,8 @@
 /**
- * Local SQLite cache helpers for explicitly device-only state.
+ * Local SQLite helpers for explicitly device-only state.
  *
  * Shared collaborative mutations are cloud-first and should not write through
- * this module. Keep usage narrow so the architecture stays unambiguous.
+ * this module.
  */
 import { upsertRecord } from '../storage/localDB';
 

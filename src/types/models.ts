@@ -150,6 +150,8 @@ export interface TripPlan {
     destination?: string;
     startDate: number;
     endDate: number;
+    startDateKey?: string;
+    endDateKey?: string;
 
     // Currency Architecture
     homeCountry: string; // NEW: immutable baseline

@@ -4,13 +4,15 @@ import { ManageMembersModal } from '@/components/ManageBuddiesModal';
 import { MeshBackground } from '@/components/MeshBackground';
 import { SpontaneousExpenseFormData, SpontaneousExpenseModal } from '@/components/SpontaneousExpenseModal';
 import { usePermissions } from '@/src/hooks/usePermissions';
-import { useRealtimeSync } from '@/src/hooks/useRealtimeSync';
+import { useNavigationGuard } from '@/src/hooks/useNavigationGuard';
+import {
+    sendDeleteRequestBroadcast,
+} from '@/src/hooks/useRealtimeSync';
 import { syncTrace } from '@/src/sync/debug';
 import { AddExchangeModal } from '@/src/features/trip/components/AddExchangeModal';
 import { ExchangeHistoryModal } from '@/src/features/trip/components/ExchangeHistoryModal';
 import { TripChoiceModal } from '@/src/features/trip/components/TripChoiceModal';
 import { TripDateNavigator } from '@/src/features/trip/components/TripDateNavigator';
-import { TripDeleteRequestsPanel } from '@/src/features/trip/components/TripDeleteRequestsPanel';
 import { TripDetailFooter } from '@/src/features/trip/components/TripDetailFooter';
 import { TripDetailHeader } from '@/src/features/trip/components/TripDetailHeader';
 import { TripOverviewCard } from '@/src/features/trip/components/TripOverviewCard';
@@ -31,13 +33,11 @@ export default function TripDetailScreen() {
     const deleteActivity = useStore(state => state.deleteActivity);
     const toggleActivityCompletion = useStore(state => state.toggleActivityCompletion);
     const updateActivity = useStore(state => state.updateActivity);
-    const { sendDeleteRequest, sendDeleteRequestCancelled } = useRealtimeSync();
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const tripMutationCounts = useStore(state => state.tripMutationCounts);
-    const deletionRequests = useStore(state => state.deletionRequests);
-    const removeDeletionRequest = useStore(state => state.removeDeletionRequest);
     const isDark = theme === 'dark';
     const router = useRouter();
+    const { safeNavigate } = useNavigationGuard();
     const insets = useSafeAreaInsets();
 
     const [deletingActivity, setDeletingActivity] = useState<Activity | null>(null);
@@ -49,7 +49,6 @@ export default function TripDetailScreen() {
     const [isExchangeHistoryVisible, setIsExchangeHistoryVisible] = useState(false);
     const [isBuddiesVisible, setIsBuddiesVisible] = useState(false);
     const [selectedDateIndex, setSelectedDateIndex] = useState(0);
-    const [showDeletePanel, setShowDeletePanel] = useState(false);
     const [budgetDisplayHome, setBudgetDisplayHome] = useState(true);
     const [selectedBalanceIndex, setSelectedBalanceIndex] = useState(0);
 
@@ -117,6 +116,13 @@ export default function TripDetailScreen() {
     const tripCurrency = useMemo(() => walletsStats[0]?.currency || '', [walletsStats]);
     const primaryRate = useMemo(() => walletsStats[0]?.effectiveRate || 1, [walletsStats]);
     const toggleBudgetCurrency = useCallback(() => setBudgetDisplayHome(prev => !prev), []);
+    const walletRateById = useMemo(() => {
+        const map: Record<string, number> = {};
+        trip?.wallets?.forEach(wallet => {
+            map[wallet.id] = wallet.baselineExchangeRate || wallet.defaultRate || 1;
+        });
+        return map;
+    }, [trip?.wallets]);
 
     const plannedAllottedHome = useMemo(() => {
         return tripActivities
@@ -126,11 +132,9 @@ export default function TripDetailScreen() {
                 const budgetCurrency = activity.budgetCurrency || '';
                 if (budgetCurrency === homeCurrency) return sum + budget;
 
-                const wallet = trip?.wallets?.find(item => item.id === activity.walletId);
-                const rate = wallet?.baselineExchangeRate || wallet?.defaultRate || 1;
-                return sum + (budget * rate);
+                return sum + (budget * (walletRateById[activity.walletId || ''] ?? 1));
             }, 0);
-    }, [homeCurrency, trip, tripActivities]);
+    }, [homeCurrency, tripActivities, walletRateById]);
 
     const totalCommittedHome = plannedAllottedHome;
 
@@ -155,24 +159,43 @@ export default function TripDetailScreen() {
     const totalCommittedTrip = primaryRate > 0 ? totalCommittedHome / primaryRate : 0;
     const totalWalletBudgetTrip = primaryRate > 0 ? totalWalletBudgetHome / primaryRate : 0;
     const isOverBudget = totalCommittedHome > totalWalletBudgetHome;
+    const balanceRatio = useMemo(() => {
+        if (!trip) return 1;
+
+        if (selectedBalanceIndex === 0 || !walletsStats || walletsStats.length === 0) {
+            if (totalWalletBudgetHome <= 0) return 1;
+            return Math.max(0, Math.min(totalWalletBalanceHome / totalWalletBudgetHome, 1));
+        }
+
+        const wallet = walletsStats[selectedBalanceIndex - 1];
+        if (!wallet || wallet.totalExchangedTrip <= 0) return 1;
+
+        return Math.max(0, Math.min(wallet.balance / wallet.totalExchangedTrip, 1));
+    }, [selectedBalanceIndex, totalWalletBalanceHome, totalWalletBudgetHome, trip, walletsStats]);
 
     const { canEdit: isAdmin, isCreator, currentMember } = usePermissions(trip?.id || '');
 
     const activitiesByDate = useMemo(() => {
-        const groups: { date: number; activities: Activity[] }[] = [];
+        const groups = new Map<number, Activity[]>();
         const sorted = [...tripActivities].sort((a, b) => a.date - b.date || a.time - b.time);
 
         sorted.forEach(activity => {
-            const dateStr = new Date(activity.date).toDateString();
-            const group = groups.find(item => new Date(item.date).toDateString() === dateStr);
+            const keyDate = new Date(activity.date);
+            keyDate.setHours(0, 0, 0, 0);
+            const key = keyDate.getTime();
+
+            const group = groups.get(key);
             if (group) {
-                group.activities.push(activity);
-            } else {
-                groups.push({ date: activity.date, activities: [activity] });
+                group.push(activity);
+                return;
             }
+
+            groups.set(key, [activity]);
         });
 
-        return groups.sort((a, b) => a.date - b.date);
+        return Array.from(groups.entries())
+            .map(([date, groupedActivities]) => ({ date, activities: groupedActivities }))
+            .sort((a, b) => a.date - b.date);
     }, [tripActivities]);
 
     const safeDateIndex = Math.min(selectedDateIndex, Math.max(0, activitiesByDate.length - 1));
@@ -188,11 +211,11 @@ export default function TripDetailScreen() {
         if (activity.isCompleted) return;
 
         if (activity.expenses.length > 0) {
-            router.push(`/create-activity?tripId=${id}&activityId=${activity.id}` as any);
+            safeNavigate(() => router.push(`/create-activity?tripId=${id}&activityId=${activity.id}` as any));
         } else {
-            router.push(`/add-expense/${activity.id}` as any);
+            safeNavigate(() => router.push(`/add-expense/${activity.id}` as any));
         }
-    }, [id, router]);
+    }, [id, router, safeNavigate]);
 
     const handleEditActivity = useCallback((activity: Activity) => {
         if (activity.isSpontaneous) {
@@ -222,12 +245,18 @@ export default function TripDetailScreen() {
         setDeletingActivity(null);
     }, [deleteActivity, deletingActivity]);
 
-    const tripDeletionRequests = deletionRequests.filter(request => request.tripId === id);
+    useEffect(() => {
+        syncTrace('TripScreen', 'screen_mount', {
+            tripId: id,
+            activityCount: tripActivities.length,
+            groupedDateCount: activitiesByDate.length,
+        });
+    }, [activitiesByDate.length, id, tripActivities.length]);
 
     const handleRequestDelete = useCallback((activity: Activity) => {
         if (!currentMember) return;
 
-        sendDeleteRequest({
+        sendDeleteRequestBroadcast({
             id: `${Date.now()}-${activity.id}`,
             tripId: id as string,
             activityId: activity.id,
@@ -237,24 +266,7 @@ export default function TripDetailScreen() {
             requestedByColor: currentMember.color,
             requestedAt: Date.now(),
         });
-    }, [currentMember, id, sendDeleteRequest]);
-
-    const handleApproveDelete = useCallback((request: typeof tripDeletionRequests[0]) => {
-        deleteActivity(request.activityId);
-        removeDeletionRequest(request.id);
-        sendDeleteRequestCancelled(request.tripId, request.id);
-        if (tripDeletionRequests.length <= 1) {
-            setShowDeletePanel(false);
-        }
-    }, [deleteActivity, removeDeletionRequest, sendDeleteRequestCancelled, tripDeletionRequests.length]);
-
-    const handleRejectDelete = useCallback((request: typeof tripDeletionRequests[0]) => {
-        removeDeletionRequest(request.id);
-        sendDeleteRequestCancelled(request.tripId, request.id);
-        if (tripDeletionRequests.length <= 1) {
-            setShowDeletePanel(false);
-        }
-    }, [removeDeletionRequest, sendDeleteRequestCancelled, tripDeletionRequests.length]);
+    }, [currentMember, id]);
 
     const logSpontaneousExpense = useStore(state => state.logSpontaneousExpense);
 
@@ -332,23 +344,7 @@ export default function TripDetailScreen() {
 
             <TripDetailHeader
                 title={trip.title?.toUpperCase() || ''}
-                isCreator={isCreator}
-                isDark={isDark}
-                requestCount={tripDeletionRequests.length}
-                showDeletePanel={showDeletePanel}
                 onBack={handleReturnHome}
-                onToggleDeletePanel={() => setShowDeletePanel(prev => !prev)}
-            />
-
-            <TripDeleteRequestsPanel
-                insetsTop={insets.top}
-                isCreator={isCreator}
-                isDark={isDark}
-                requests={tripDeletionRequests}
-                visible={showDeletePanel}
-                onApprove={handleApproveDelete}
-                onDismiss={() => setShowDeletePanel(false)}
-                onReject={handleRejectDelete}
             />
 
             <ScrollView
@@ -360,6 +356,7 @@ export default function TripDetailScreen() {
                 <TripOverviewCard
                     balanceDetail={balanceDetail}
                     balanceFormatted={balanceFormatted}
+                    balanceRatio={balanceRatio}
                     budgetDisplayHome={budgetDisplayHome}
                     completedActivitiesCount={completedActivitiesCount}
                     homeCurrency={homeCurrency}

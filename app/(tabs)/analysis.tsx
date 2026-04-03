@@ -1,3 +1,4 @@
+import { BottomFade } from '@/components/BottomFade';
 import { CategoryCard } from '@/components/CategoryCard';
 import { Header } from '@/components/Header';
 import { MeshBackground } from '@/components/MeshBackground';
@@ -7,8 +8,8 @@ import { useBudgetAnalysisData } from '@/src/features/analysis/hooks/useBudgetAn
 import type { BreakdownMode } from '@/src/hooks/useFilteredBreakdown';
 import { useStore } from '@/src/store/useStore';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
+import { FlatList, View } from 'react-native';
 
 type TabType = 'DAILY' | 'TOTAL';
 
@@ -17,6 +18,7 @@ export default function BudgetAnalysisScreen() {
     const theme = useStore(state => state.theme);
     const trips = useStore(state => state.trips);
     const activities = useStore(state => state.activities);
+    const deferredActivities = useDeferredValue(activities);
 
     const [activeTab, setActiveTab] = useState<TabType>('TOTAL');
     const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
@@ -42,12 +44,13 @@ export default function BudgetAnalysisScreen() {
         dailyData,
         totalCategoryByMode,
         dailyCategoryData,
+        dailyIsOverBudget,
         averageDailySpending,
         averageDailyBudget,
         durationSubtitle,
     } = useBudgetAnalysisData({
         trips,
-        activities,
+        activities: deferredActivities,
         selectedTripId,
         activeTab,
         selectedDay,
@@ -121,28 +124,31 @@ export default function BudgetAnalysisScreen() {
                     onSelectTrip={setSelectedTripId}
                 />
             ) : (
-                <ScrollView
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={{ paddingBottom: 250 }}
-                    bounces={false}
-                    overScrollMode="never"
-                    className="flex-1"
-                >
-                    {sectionHeader}
-
-                    {categoryData.map(item => (
-                        <View key={item.id} className="px-6">
+                <FlatList
+                    data={categoryData}
+                    keyExtractor={(item) => item.id}
+                    renderItem={({ item }) => (
+                        <View className="px-6">
                             <CategoryCard
                                 title={item.title}
                                 spent={item.spent}
                                 percentage={item.percentage}
+                                danger={activeTab === 'DAILY' && dailyIsOverBudget}
                             />
                         </View>
-                    ))}
-
-                    <View className="h-10" />
-                </ScrollView>
+                    )}
+                    ListHeaderComponent={sectionHeader}
+                    ListFooterComponent={<View className="h-10" />}
+                    contentContainerStyle={{ paddingBottom: 250 }}
+                    bounces={false}
+                    overScrollMode="never"
+                    showsVerticalScrollIndicator={false}
+                    className="flex-1"
+                    removeClippedSubviews
+                />
             )}
+
+            <BottomFade visible={!!selectedTripId} height={170} />
 
         </MeshBackground>
     );

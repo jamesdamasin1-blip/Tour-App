@@ -31,6 +31,8 @@ export function ExchangeFundsSummaryCard({
                 borderRadius: 20,
                 marginBottom: 16,
                 alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: 116,
                 backgroundColor: isDark ? 'rgba(178, 196, 170, 0.18)' : 'rgba(93, 109, 84, 0.13)',
                 borderWidth: 1,
                 borderColor: isDark ? 'rgba(178, 196, 170, 0.25)' : 'rgba(93, 109, 84, 0.2)',
@@ -56,6 +58,19 @@ export function ExchangeFundsSummaryCard({
             <Text style={{ fontSize: 10, color: accentColor, opacity: 0.6, marginTop: 4, fontWeight: '600' }}>
                 All the money you brought into this trip
             </Text>
+            {walletCurrencyCount > 1 ? (
+                <Text
+                    style={{
+                        fontSize: 10,
+                        color: accentColor,
+                        opacity: 0.55,
+                        marginTop: 2,
+                        fontWeight: '600',
+                    }}
+                >
+                    Tap to cycle currencies
+                </Text>
+            ) : null}
         </TouchableOpacity>
     );
 }

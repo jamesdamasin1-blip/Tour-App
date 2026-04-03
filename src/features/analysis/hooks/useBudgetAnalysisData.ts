@@ -1,10 +1,12 @@
 import { useCallback, useMemo } from 'react';
 import { CATEGORY_THEME } from '@/src/constants/categories';
 import { getFundingTotalGlobalHome } from '@/src/finance/wallet/walletEngine';
+import { getNormalizedLotHomeAmount } from '@/src/finance/wallet/walletRate';
 import { useFilteredBreakdown, type BreakdownMode } from '@/src/hooks/useFilteredBreakdown';
 import { useSpendingTotals } from '@/src/hooks/useSpendingTotals';
 import type { Activity, TripPlan } from '@/src/types/models';
 import { Calculations } from '@/src/utils/mathUtils';
+import { formatTripDate, getTripDurationDays } from '@/src/utils/tripDates';
 
 type TabType = 'DAILY' | 'TOTAL';
 
@@ -84,9 +86,7 @@ export const useBudgetAnalysisData = ({
             const lots = (wallet as any).lots || [];
             lots.forEach((lot: any, index: number) => {
                 const entryKind = lot.entryKind || (index === 0 ? 'initial' : 'top_up');
-                const homeAmount = lot.sourceCurrency === homeCurrency
-                    ? lot.sourceAmount
-                    : (lot.originalConvertedAmount || 0) * (lot.rateBaseCurrency || lot.lockedRate || wallet.baselineExchangeRate || wallet.defaultRate || 1);
+                const homeAmount = getNormalizedLotHomeAmount(lot, wallet as any, homeCurrency);
                 if (entryKind === 'initial') {
                     walletInitial += homeAmount;
                 } else {
@@ -173,6 +173,26 @@ export const useBudgetAnalysisData = ({
         [buildCategoryData, displayActivities]
     );
 
+    const dailyIsOverBudget = useMemo(() => {
+        const totals = displayActivities.reduce((acc, activity) => {
+            const budget = activity.allocatedBudget || 0;
+            const budgetCurrency = activity.budgetCurrency || '';
+            const normalizedBudget = budgetCurrency === homeCurrency
+                ? budget
+                : budget * (walletRateMap[activity.walletId || ''] ?? 1);
+            const spent = (activity.expenses || []).reduce(
+                (sum, expense) => sum + (expense.convertedAmountHome || 0),
+                0
+            );
+
+            acc.budget += normalizedBudget;
+            acc.spent += spent;
+            return acc;
+        }, { budget: 0, spent: 0 });
+
+        return totals.spent > totals.budget && totals.budget > 0;
+    }, [displayActivities, homeCurrency, walletRateMap]);
+
     const averageDailySpending = useMemo(() => {
         const daysWithSpending = dailyData.filter(day => day.spent > 0).length;
         if (daysWithSpending === 0) return 0;
@@ -201,16 +221,34 @@ export const useBudgetAnalysisData = ({
 
     const durationSubtitle = useMemo(() => {
         if (!selectedTrip) return 'Trip Insights';
-        const start = new Date(selectedTrip.startDate).toLocaleDateString('en-US', {
-            month: 'short',
-            day: '2-digit',
+        const start = formatTripDate({
+            dateKey: selectedTrip.startDateKey,
+            timestamp: selectedTrip.startDate,
+            homeCountry: selectedTrip.homeCountry,
+            locale: 'en-US',
+            options: {
+                month: 'short',
+                day: '2-digit',
+            },
         });
-        const end = new Date(selectedTrip.endDate).toLocaleDateString('en-US', {
-            month: 'short',
-            day: '2-digit',
-            year: 'numeric',
+        const end = formatTripDate({
+            dateKey: selectedTrip.endDateKey,
+            timestamp: selectedTrip.endDate,
+            homeCountry: selectedTrip.homeCountry,
+            locale: 'en-US',
+            options: {
+                month: 'short',
+                day: '2-digit',
+                year: 'numeric',
+            },
         });
-        const days = Math.ceil((selectedTrip.endDate - selectedTrip.startDate) / (1000 * 60 * 60 * 24)) + 1;
+        const days = getTripDurationDays(
+            selectedTrip.startDateKey,
+            selectedTrip.endDateKey,
+            selectedTrip.startDate,
+            selectedTrip.endDate,
+            selectedTrip.homeCountry
+        );
         return `${start} - ${end} • ${days} ${days === 1 ? 'Day' : 'Days'}`;
     }, [selectedTrip]);
 
@@ -222,6 +260,7 @@ export const useBudgetAnalysisData = ({
         dailyData,
         totalCategoryByMode,
         dailyCategoryData,
+        dailyIsOverBudget,
         averageDailySpending,
         averageDailyBudget,
         durationSubtitle,

@@ -7,6 +7,7 @@ import { Calculations as MathUtils } from '@/src/utils/mathUtils';
 import { useStore } from '@/src/store/useStore';
 import { ExchangeEvent } from '@/src/types/models';
 import { getDefaultLot } from '../../../finance/wallet/walletEngine';
+import { getNormalizedFundingRate, getNormalizedFundingTripAmount } from '@/src/finance/wallet/walletRate';
 import dayjs from 'dayjs';
 
 interface ExchangeEventListProps {
@@ -17,7 +18,7 @@ interface ExchangeEventListProps {
 export const ExchangeEventList = ({ tripId, onEdit }: ExchangeEventListProps) => {
     const { exchangeEvents } = useExchangeEvents(tripId);
     const trip = useStore(state => state.trips.find(t => t.id === tripId));
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     const renderEvent = (event: ExchangeEvent) => {
@@ -25,8 +26,22 @@ export const ExchangeEventList = ({ tripId, onEdit }: ExchangeEventListProps) =>
         const tripCurrency = wallet?.currency || 'USD';
         const homeCurrency = trip?.homeCurrency || 'USD';
         const defaultLot = wallet ? getDefaultLot(wallet as any) : undefined;
+        const normalizedRate = getNormalizedFundingRate({
+            homeCurrency,
+            sourceCurrency: event.sourceCurrency || homeCurrency,
+            storedRate: event.rate,
+            wallet: wallet as any,
+        });
+        const normalizedTripAmount = getNormalizedFundingTripAmount({
+            homeCurrency,
+            sourceAmount: event.homeAmount,
+            sourceCurrency: event.sourceCurrency || homeCurrency,
+            storedRate: event.rate,
+            storedTripAmount: event.tripAmount,
+            wallet: wallet as any,
+        });
         // Match rate with default lot locked rate lookup
-        const isDefault = defaultLot && Math.abs(defaultLot.lockedRate - event.rate) < 0.001;
+        const isDefault = defaultLot && Math.abs(defaultLot.lockedRate - normalizedRate) < 0.001;
 
         return (
             <View key={event.id} className="mb-3">
@@ -47,7 +62,7 @@ export const ExchangeEventList = ({ tripId, onEdit }: ExchangeEventListProps) =>
                                 {dayjs(event.date).format('MMM D, YYYY · HH:mm')}
                             </Text>
                             <Text className={`font-bold text-base ${isDark ? 'text-white' : 'text-[#2D342B]'}`}>
-                                +{MathUtils.formatCurrency(event.tripAmount, tripCurrency)}
+                                +{MathUtils.formatCurrency(normalizedTripAmount, tripCurrency)}
                                 <Text className="text-[10px] ml-1 opacity-60 font-medium"> TRIP wallet</Text>
                             </Text>
                         </View>
@@ -73,7 +88,7 @@ export const ExchangeEventList = ({ tripId, onEdit }: ExchangeEventListProps) =>
                         <View className="items-end">
                             <Text className={`text-[8px] font-black uppercase opacity-40 ${isDark ? 'text-[#B2C4AA]' : 'text-[#5D6D54]'}`}>Rate</Text>
                             <Text className={`text-[11px] font-semibold ${isDark ? 'text-white' : 'text-gray-600'}`}>
-                                1 {tripCurrency} = {event.rate.toFixed(4)} {homeCurrency}
+                                1 {tripCurrency} = {normalizedRate.toFixed(4)} {homeCurrency}
                             </Text>
                         </View>
                     </View>

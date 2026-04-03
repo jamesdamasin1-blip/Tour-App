@@ -19,6 +19,7 @@ import { useStore } from '@/src/store/useStore';
 import { AnimatedModal } from '@/components/AnimatedModal';
 import { RippleButton } from '@/components/RippleButton';
 import { CurrencyConversionService } from '@/src/services/currencyConversion';
+import { isSuspiciousWalletRate } from '@/src/finance/wallet/walletRate';
 import { syncTrace } from '@/src/sync/debug';
 import { ExchangeEvent } from '@/src/types/models';
 import {
@@ -43,7 +44,7 @@ interface AddExchangeModalProps {
 export const AddExchangeModal = ({ tripId, visible, onClose, editingEvent }: AddExchangeModalProps) => {
     const { addExchangeEvent, updateExchangeEvent } = useExchangeEvents(tripId);
     const { homeCurrency, walletsStats } = useTripWallet(tripId);
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const isEditing = !!editingEvent;
 
@@ -116,6 +117,10 @@ export const AddExchangeModal = ({ tripId, visible, onClose, editingEvent }: Add
 
         if (!selectedWalletId) { alert('Please select a wallet'); return; }
         if (h <= 0 || t <= 0) { alert('Please enter valid amounts'); return; }
+        if (activeWallet?.effectiveRate && isSuspiciousWalletRate(r, activeWallet.effectiveRate)) {
+            alert(`That conversion looks off. This wallet is usually around 1 ${tripCurrency} = ${activeWallet.effectiveRate.toFixed(4)} ${homeCurrency}. Please recheck the ${tripCurrency} amount.`);
+            return;
+        }
 
         try {
             setIsSaving(true);

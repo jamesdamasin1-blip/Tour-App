@@ -44,7 +44,7 @@ const TABS: { key: TotalMode; label: string }[] = [
 ];
 
 export const DonutChartCard = React.memo(({ totalBudget, overall, planned, spontaneous, mode, onModeChange, budgetComparison }: DonutChartProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const [page, setPage] = useState<0 | 1>(0);
 

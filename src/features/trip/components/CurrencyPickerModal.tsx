@@ -14,7 +14,7 @@ interface CurrencyPickerModalProps {
 }
 
 export const CurrencyPickerModal = ({ visible, onClose, onSelect, selectedCurrency, availableCurrencies }: CurrencyPickerModalProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     return (

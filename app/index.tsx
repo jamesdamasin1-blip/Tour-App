@@ -1,12 +1,11 @@
 import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { getAuthState } from '@/src/auth/googleAuth';
-import { getSyncMeta } from '@/src/storage/localDB';
+import { setSyncMeta } from '@/src/storage/localDB';
 
 /**
  * Root index — Auth gate.
  * Redirects to auth entry if never logged in, otherwise to tabs.
- * "Continue Offline" sets a flag so users aren't asked again.
  */
 export default function RootIndex() {
     const [ready, setReady] = useState(false);
@@ -14,11 +13,10 @@ export default function RootIndex() {
 
     useEffect(() => {
         (async () => {
-            // Check if user previously chose offline or is authenticated
-            const skippedAuth = getSyncMeta('skippedAuth');
             const auth = await getAuthState();
+            setSyncMeta('skippedAuth', 'false');
 
-            if (auth.isAuthenticated || skippedAuth === 'true') {
+            if (auth.isAuthenticated) {
                 setGoToTabs(true);
             }
             setReady(true);

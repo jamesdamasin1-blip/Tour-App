@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, LayoutChangeEvent, Text, View } from 'react-native';
+import { Animated, Easing, LayoutChangeEvent, Platform, Text, View } from 'react-native';
 import { useStore } from '@/src/store/useStore';
 
 interface ProgressBarProps {
@@ -15,6 +15,7 @@ interface ProgressBarProps {
     fontSize?: number;
     freezeWhile?: boolean;
     settleMs?: number;
+    animated?: boolean;
 }
 
 export const ProgressBar = React.memo(({
@@ -29,8 +30,9 @@ export const ProgressBar = React.memo(({
     fontSize = 11,
     freezeWhile = false,
     settleMs = 180,
+    animated = Platform.OS !== 'android',
 }: ProgressBarProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     const [width, setWidth] = useState(0);
@@ -53,6 +55,8 @@ export const ProgressBar = React.memo(({
     const [displayedLabel, setDisplayedLabel] = useState(nextLabel);
 
     useEffect(() => {
+        if (!animated) return;
+
         if (settleTimerRef.current) {
             clearTimeout(settleTimerRef.current);
             settleTimerRef.current = null;
@@ -79,16 +83,17 @@ export const ProgressBar = React.memo(({
                 settleTimerRef.current = null;
             }
         };
-    }, [clampedProgress, displayedLabel, displayedProgress, freezeWhile, nextLabel, settleMs]);
+    }, [animated, clampedProgress, displayedLabel, displayedProgress, freezeWhile, nextLabel, settleMs]);
 
     useEffect(() => {
+        if (!animated) return;
         Animated.timing(progressAnim, {
             toValue: displayedProgress,
             duration: 320,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: false,
         }).start();
-    }, [displayedProgress, progressAnim]);
+    }, [animated, displayedProgress, progressAnim]);
 
     const handleLayout = (event: LayoutChangeEvent) => {
         setWidth(event.nativeEvent.layout.width);
@@ -109,13 +114,77 @@ export const ProgressBar = React.memo(({
         />
     );
 
+    const resolvedProgress = animated ? displayedProgress : clampedProgress;
+    const resolvedLabel = animated ? displayedLabel : nextLabel;
+    const resolvedWidth = width > 0 ? (resolvedProgress / 100) * width : 0;
+
+    if (!animated) {
+        return (
+            <View
+                onLayout={handleLayout}
+                className="w-full rounded-full overflow-hidden relative"
+                style={{ height, backgroundColor: trackColor }}
+            >
+                {resolvedLabel.length > 0 && (
+                    <View className="absolute inset-0 items-center justify-center pointer-events-none">
+                        <Text
+                            style={{
+                                fontSize,
+                                color: isDark ? 'rgba(242, 240, 232, 0.6)' : '#000000',
+                                fontWeight: '900',
+                                textTransform: 'uppercase',
+                                letterSpacing: 1.2,
+                                textAlign: 'center',
+                            }}
+                            numberOfLines={1}
+                        >
+                            {resolvedLabel}
+                        </Text>
+                    </View>
+                )}
+
+                <View
+                    className="h-full rounded-full overflow-hidden absolute left-0 top-0 bottom-0"
+                    style={{ width: resolvedWidth }}
+                >
+                    <View className="absolute inset-0">
+                        {innerBarContent}
+                    </View>
+
+                    {resolvedLabel.length > 0 && width > 0 && (
+                        <View
+                            style={{ width, height: '100%', alignItems: 'center', justifyContent: 'center' }}
+                            className="pointer-events-none"
+                        >
+                            <Text
+                                style={{
+                                    fontSize,
+                                    color: '#FFFFFF',
+                                    fontWeight: '900',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: 1.2,
+                                    textAlign: 'center',
+                                    position: 'absolute',
+                                    top: (height - fontSize * 1.2) / 2,
+                                }}
+                                numberOfLines={1}
+                            >
+                                {resolvedLabel}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+            </View>
+        );
+    }
+
     return (
         <View
             onLayout={handleLayout}
             className="w-full rounded-full overflow-hidden relative"
             style={{ height, backgroundColor: trackColor }}
         >
-            {displayedLabel.length > 0 && (
+            {resolvedLabel.length > 0 && (
                 <View className="absolute inset-0 items-center justify-center pointer-events-none">
                     <Text
                         style={{
@@ -128,7 +197,7 @@ export const ProgressBar = React.memo(({
                         }}
                         numberOfLines={1}
                     >
-                        {displayedLabel}
+                        {resolvedLabel}
                     </Text>
                 </View>
             )}
@@ -147,7 +216,7 @@ export const ProgressBar = React.memo(({
                     {innerBarContent}
                 </View>
 
-                {displayedLabel.length > 0 && width > 0 && (
+                {resolvedLabel.length > 0 && width > 0 && (
                     <View
                         style={{ width, height: '100%', alignItems: 'center', justifyContent: 'center' }}
                         className="pointer-events-none"
@@ -165,7 +234,7 @@ export const ProgressBar = React.memo(({
                             }}
                             numberOfLines={1}
                         >
-                            {displayedLabel}
+                            {resolvedLabel}
                         </Text>
                     </View>
                 )}

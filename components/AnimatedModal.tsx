@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback } from 'react';
-import { Modal, StyleSheet, View, TouchableOpacity, Dimensions } from 'react-native';
+import { Modal, StyleSheet, View, TouchableOpacity, Dimensions, KeyboardAvoidingView, Platform } from 'react-native';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -24,6 +24,9 @@ interface AnimatedModalProps {
     origin?: 'center' | 'bottom';
     /** Dismiss on backdrop tap (default true) */
     dismissable?: boolean;
+    /** Shift the modal above the software keyboard when inputs focus. */
+    keyboardAware?: boolean;
+    keyboardVerticalOffset?: number;
 }
 
 export function AnimatedModal({
@@ -32,8 +35,10 @@ export function AnimatedModal({
     children,
     origin = 'center',
     dismissable = true,
+    keyboardAware = false,
+    keyboardVerticalOffset = 24,
 }: AnimatedModalProps) {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     // 0 = hidden, 1 = fully visible
@@ -84,6 +89,20 @@ export function AnimatedModal({
 
     if (!modalVisible && !visible) return null;
 
+    const modalContent = (
+        <TouchableOpacity
+            style={[styles.fill, isBottom && styles.fillBottom]}
+            activeOpacity={1}
+            onPress={dismissable ? onClose : undefined}
+        >
+            <Animated.View style={[styles.contentWrap, isBottom && styles.contentWrapBottom, contentStyle]} pointerEvents="box-none">
+                <TouchableOpacity activeOpacity={1} onPress={() => {}} style={isBottom ? { flex: 1 } : undefined}>
+                    {children}
+                </TouchableOpacity>
+            </Animated.View>
+        </TouchableOpacity>
+    );
+
     return (
         <Modal visible={modalVisible} transparent statusBarTranslucent onRequestClose={onClose}>
             {/* Backdrop */}
@@ -96,19 +115,16 @@ export function AnimatedModal({
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.15)' }]} />
             </Animated.View>
 
-            {/* Dismiss tap zone */}
-            <TouchableOpacity
-                style={[styles.fill, isBottom && styles.fillBottom]}
-                activeOpacity={1}
-                onPress={dismissable ? onClose : undefined}
-            >
-                {/* Content */}
-                <Animated.View style={[styles.contentWrap, isBottom && styles.contentWrapBottom, contentStyle]} pointerEvents="box-none">
-                    <TouchableOpacity activeOpacity={1} onPress={() => {}} style={isBottom ? { flex: 1 } : undefined}>
-                        {children}
-                    </TouchableOpacity>
-                </Animated.View>
-            </TouchableOpacity>
+            {keyboardAware ? (
+                <KeyboardAvoidingView
+                    style={styles.keyboardAvoider}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    keyboardVerticalOffset={keyboardVerticalOffset}
+                    pointerEvents="box-none"
+                >
+                    {modalContent}
+                </KeyboardAvoidingView>
+            ) : modalContent}
         </Modal>
     );
 }
@@ -164,5 +180,8 @@ const styles = StyleSheet.create({
     contentWrapBottom: {
         flex: 1,
         maxWidth: undefined,
+    },
+    keyboardAvoider: {
+        flex: 1,
     },
 });

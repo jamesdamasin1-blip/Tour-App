@@ -35,7 +35,7 @@ export const GlassTimePicker: React.FC<GlassTimePickerProps> = ({
     onChange,
     title = 'SELECT TIME',
 }) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const [tempHour, setTempHour] = useState(value.hour() % 12 || 12);
     const [tempMinute, setTempMinute] = useState(value.minute());

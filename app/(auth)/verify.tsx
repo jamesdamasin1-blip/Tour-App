@@ -116,16 +116,6 @@ export default function VerifyScreen() {
                         <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
                     ) : null}
                 </GlassView>
-
-                <TouchableOpacity
-                    style={styles.offlineButton}
-                    onPress={() => router.replace('/(tabs)')}
-                    activeOpacity={0.7}
-                >
-                    <Text style={[styles.offlineText, { color: colors.subtext }]}>
-                        Continue Offline for Now
-                    </Text>
-                </TouchableOpacity>
             </View>
         </MeshBackground>
     );
@@ -191,12 +181,5 @@ const styles = StyleSheet.create({
         fontSize: 13,
         textAlign: 'center',
         marginTop: 12,
-    },
-    offlineButton: {
-        alignItems: 'center',
-        marginTop: 24,
-    },
-    offlineText: {
-        fontSize: 14,
     },
 });

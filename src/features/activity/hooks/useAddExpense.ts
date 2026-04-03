@@ -51,8 +51,9 @@ export const useAddExpense = (activityId: string) => {
 
     // Always convert using the baseline rate set at trip creation stage
     const conversions = useMemo(() => {
+        if (amount.trim() === '') return { home: 0, trip: 0 };
         const value = CurrencyService.parseInput(amount);
-        if (value <= 0) return { home: 0, trip: 0 };
+        if (value < 0) return { home: 0, trip: 0 };
 
         let amountInTrip = 0;
         let amountInHome = 0;
@@ -71,23 +72,25 @@ export const useAddExpense = (activityId: string) => {
 
         return { home: amountInHome, trip: amountInTrip };
     }, [amount, currency, baselineRate, tripCurrency, homeCurrency]);
+    const availableBalanceTrip = walletStats?.balance || 0;
+    const availableBalanceHome = walletStats?.homeEquivalent ?? (availableBalanceTrip * baselineRate);
     const availableBalanceSelected = currency === homeCurrency
-        ? (walletStats?.balance || 0) * baselineRate
-        : (walletStats?.balance || 0);
+        ? availableBalanceHome
+        : availableBalanceTrip;
     const amountValidationError = conversions.trip > (walletStats?.balance || 0) + 0.01
         ? `Amount exceeds available ${currency} ${availableBalanceSelected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
         : '';
-    const amountHelperText = `Available in wallet: ${currency} ${availableBalanceSelected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
+    const amountHelperText = `Available in wallet now: ${currency} ${availableBalanceSelected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
 
     const handleSave = async () => {
         if (saveLockRef.current) return;
         if (!isAdmin || !trip || !activity) return;
-        
-        const value = CurrencyService.parseInput(amount);
-        if (value <= 0) {
+
+        if (amount.trim() === '') {
             alert('Please enter a valid amount.');
             return;
         }
+        const value = CurrencyService.parseInput(amount);
         if (amountValidationError) {
             alert(amountValidationError);
             return;

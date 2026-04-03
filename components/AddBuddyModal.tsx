@@ -4,25 +4,22 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { useStore } from '@/src/store/useStore';
 import { Feather } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Share, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { AddBuddyInviteStep } from '@/src/features/trip/components/member/AddBuddyInviteStep';
-import { AddBuddyMethodStep } from '@/src/features/trip/components/member/AddBuddyMethodStep';
 import { AddBuddyTripStep } from '@/src/features/trip/components/member/AddBuddyTripStep';
-import { buildTripShareCode, buildTripShareQrPayload } from '@/src/features/trip/components/member/memberSharePayload';
 
 interface AddBuddyModalProps {
     visible: boolean;
     onClose: () => void;
-    onScanQR?: () => void;
     initialTripId?: string;
     initialStep?: Step;
     hideBackButton?: boolean;
 }
 
-type Step = 'trip' | 'method' | 'qr' | 'code' | 'email';
+type Step = 'trip' | 'email';
 
 export const AddBuddyModal = ({ visible, onClose, initialTripId, initialStep, hideBackButton }: AddBuddyModalProps) => {
-    const { theme, trips, activities, sendEmailInvite } = useStore();
+    const { theme, trips, sendEmailInvite } = useStore();
     const { userId, email: userEmail, displayName, isAuthenticated } = useAuth();
     const isDark = theme === 'dark';
 
@@ -36,7 +33,7 @@ export const AddBuddyModal = ({ visible, onClose, initialTripId, initialStep, hi
 
     const prevStep = useRef(step);
     const stepDirection = (() => {
-        const order: Step[] = ['trip', 'method', 'qr', 'code', 'email'];
+        const order: Step[] = ['trip', 'email'];
         return order.indexOf(step) >= order.indexOf(prevStep.current) ? 'forward' : 'backward';
     })() as 'forward' | 'backward';
     if (prevStep.current !== step) {
@@ -71,17 +68,7 @@ export const AddBuddyModal = ({ visible, onClose, initialTripId, initialStep, hi
 
     const handleSelectTrip = (tripId: string) => {
         setSelectedTripId(tripId);
-        setStep('method');
-    };
-
-    const handleShareCode = async () => {
-        try {
-            const encodedData = buildTripShareCode(selectedTrip, activities);
-            const shareMessage = `Hey! Join my trip "${selectedTrip?.title}" on Aliqual.\n\nCopy this code and select the "+" icon in the My Trips screen:\n\n${encodedData}`;
-            await Share.share({ message: shareMessage, title: `Join ${selectedTrip?.title}` });
-        } catch {
-            Alert.alert('Error', 'Failed to share invite code.');
-        }
+        setStep('email');
     };
 
     const handleEmailInvite = async () => {
@@ -122,38 +109,33 @@ export const AddBuddyModal = ({ visible, onClose, initialTripId, initialStep, hi
     };
 
     const goBack = () => {
-        if (step === 'qr' || step === 'code' || step === 'email') {
-            setStep('method');
-            return;
-        }
-        if (step === 'method') {
-            if (initialTripId) {
-                handleClose();
-            } else {
+        if (step === 'email') {
+            if (!initialTripId) {
                 setStep('trip');
+                return;
             }
+
+            handleClose();
             return;
         }
+
         handleClose();
     };
 
     const getTitle = () => {
         switch (step) {
             case 'trip': return 'SELECT TRIP';
-            case 'method': return 'ADD MEMBER';
-            case 'qr': return 'SHOW QR CODE';
-            case 'code': return 'SHARE CODE';
             case 'email': return 'INVITE BY EMAIL';
         }
     };
 
     return (
-        <AnimatedModal visible={visible} onClose={handleClose}>
+        <AnimatedModal visible={visible} onClose={handleClose} keyboardAware>
             <GlassView
                 intensity={isDark ? 80 : 90}
                 borderRadius={36}
                 backgroundColor={isDark ? 'rgba(30, 34, 28, 0.88)' : 'rgba(255, 255, 255, 0.88)'}
-                style={{ width: '100%', padding: 24 }}
+                style={{ width: '100%', padding: 24, maxHeight: '82%' }}
             >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -176,16 +158,7 @@ export const AddBuddyModal = ({ visible, onClose, initialTripId, initialStep, hi
                         <AddBuddyTripStep activeTrips={activeTrips} isDark={isDark} onSelectTrip={handleSelectTrip} />
                     )}
 
-                    {step === 'method' && (
-                        <AddBuddyMethodStep
-                            isDark={isDark}
-                            onOpenCode={() => setStep('code')}
-                            onOpenEmail={() => setStep('email')}
-                            onOpenQr={() => setStep('qr')}
-                        />
-                    )}
-
-                    {(step === 'qr' || step === 'code' || step === 'email') && (
+                    {step === 'email' && (
                         <AddBuddyInviteStep
                             email={email}
                             error={error}
@@ -194,13 +167,10 @@ export const AddBuddyModal = ({ visible, onClose, initialTripId, initialStep, hi
                             isAuthenticated={isAuthenticated}
                             isDark={isDark}
                             isSendingInvite={isSendingInvite}
-                            qrPayload={buildTripShareQrPayload(selectedTrip)}
-                            step={step}
                             onChangeEmail={value => { setEmail(value); setError(''); }}
                             onInviteAnother={() => setInviteSent(false)}
                             onSelectRole={setInviteRole}
                             onSendInvite={handleEmailInvite}
-                            onShareCode={handleShareCode}
                         />
                     )}
                 </StepTransition>

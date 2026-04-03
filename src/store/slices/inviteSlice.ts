@@ -2,8 +2,7 @@ import { StateCreator } from 'zustand';
 import { inviteService } from '../../services/inviteService';
 import { TripInvite } from '../../types/models';
 import { ensureDistinctMemberColors } from '../../utils/memberAttribution';
-import { buildTripDisplayFields } from '../../utils/tripDisplayFields';
-import { fetchTripCloudBundle } from '../cloudSyncHelpers';
+import { refreshTripCloudState } from '../cloudSyncHelpers';
 import type { AppState } from '../useStore';
 
 export interface InviteSlice {
@@ -24,8 +23,8 @@ export interface InviteSlice {
     /** Load pending invites addressed to the current user */
     loadReceivedInvites: (email: string) => Promise<void>;
 
-    /** Accept an invite and import the trip */
-    acceptInvite: (inviteId: string) => Promise<void>;
+    /** Accept an invite and hydrate the trip from the cloud */
+    acceptInvite: (inviteId: string) => Promise<string | null>;
 
     /** Decline an invite */
     declineInvite: (inviteId: string) => Promise<void>;
@@ -39,14 +38,9 @@ export const createInviteSlice: StateCreator<AppState, [], [], InviteSlice> = (s
     inviteLoading: false,
 
     sendEmailInvite: async (params) => {
-        const bundle = await fetchTripCloudBundle(params.tripId);
-        if (!bundle) {
-            throw new Error('Trip is not available in the cloud yet. Please try again in a moment.');
-        }
-
         const invite = await inviteService.sendInvite({
             ...params,
-            tripTitle: bundle.trip.title || params.tripTitle,
+            tripTitle: params.tripTitle,
             role: params.role || 'editor',
         });
         return invite;
@@ -64,7 +58,7 @@ export const createInviteSlice: StateCreator<AppState, [], [], InviteSlice> = (s
 
     acceptInvite: async (inviteId) => {
         const invite = get().invites.find(i => i.id === inviteId);
-        if (!invite) return;
+        if (!invite) return null;
 
         const { supabase } = await import('../storeHelpers');
         const { getAuthState } = await import('../../auth/googleAuth');
@@ -77,8 +71,6 @@ export const createInviteSlice: StateCreator<AppState, [], [], InviteSlice> = (s
         const memberColor = BUDDY_COLORS.find((c: string) => !usedColors.includes(c)) ||
             BUDDY_COLORS[1] ||
             BUDDY_COLORS[existingMembers.length % BUDDY_COLORS.length];
-
-        let importSuccess = false;
 
         // Try the RPC function first (handles RLS, atomically accepts + adds member + returns data)
         const { data: rpcResult, error: rpcError } = await supabase.rpc('accept_trip_invite', {
@@ -108,25 +100,19 @@ export const createInviteSlice: StateCreator<AppState, [], [], InviteSlice> = (s
             throw new Error('The trip has been deleted by its owner.');
         }
 
-        if (rpcResult?.trip) {
-            const tripRow = rpcResult.trip;
-            const activityRows = rpcResult.activities || [];
-            const expenseRows = rpcResult.expenses || [];
-
-            await importTripFromCloud(tripRow, activityRows, expenseRows, invite, get, set);
-            importSuccess = true;
-        } else {
+        const acceptedTripId = rpcResult?.trip?.id || invite.tripId;
+        if (!acceptedTripId) {
             throw new Error('Unexpected response from server. Please try again.');
         }
 
-        // Only mark accepted locally if the import actually succeeded
-        if (importSuccess) {
-            set(state => ({
-                invites: state.invites.map(i =>
-                    i.id === inviteId ? { ...i, status: 'accepted' as const } : i
-                ),
-            }));
-        }
+        await refreshTripCloudState(acceptedTripId);
+        set(state => ({
+            invites: state.invites.map(i =>
+                i.id === inviteId ? { ...i, status: 'accepted' as const } : i
+            ),
+        }));
+
+        return acceptedTripId;
     },
 
     declineInvite: async (inviteId) => {
@@ -145,137 +131,3 @@ export const createInviteSlice: StateCreator<AppState, [], [], InviteSlice> = (s
         });
     },
 });
-
-/**
- * Import a trip + activities + expenses from Supabase rows into local state.
- * IMPORTANT: We do NOT call offlineSync.trip()/activity()/expense() here because
- * the data already exists on the server. Enqueuing sync events would push the trip
- * back with the joiner's user_id, effectively stealing ownership from the creator.
- * We only persist to local SQLite (for the sync engine's pull queries) marked as 'synced'.
- */
-async function importTripFromCloud(
-    tripRow: any,
-    activityRows: any[],
-    expenseRows: any[],
-    invite: TripInvite,
-    get: () => AppState,
-    set: (fn: (s: AppState) => Partial<AppState>) => void,
-) {
-    const { upsertRecord } = await import('../../storage/localDB');
-    const state = get();
-
-    // Build the trip object from the cloud row
-    const trip = {
-        id: tripRow.id,
-        userId: tripRow.user_id || undefined,
-        title: tripRow.title,
-        destination: tripRow.destination,
-        startDate: Number(tripRow.start_date),
-        endDate: Number(tripRow.end_date),
-        homeCountry: tripRow.home_country,
-        homeCurrency: tripRow.home_currency,
-        wallets: tripRow.wallets || [],
-        ...buildTripDisplayFields(tripRow.wallets || [], tripRow.home_currency),
-        countries: tripRow.countries || [],
-        members: ensureDistinctMemberColors(tripRow.members || []),
-        isCompleted: tripRow.is_completed || false,
-        lastModified: Number(tripRow.last_modified || Date.now()),
-        role: invite.role === 'viewer' ? 'viewer' as const : 'admin' as const,
-        isCloudSynced: true,
-        version: Number(tripRow.version || 1),
-        updatedBy: tripRow.updated_by || undefined,
-        deletedAt: null,
-    };
-
-    // Persist to local SQLite without enqueuing a sync push
-    upsertRecord('trips', trip.id, trip, { userId: tripRow.user_id || '' });
-
-    // Update local trip if it already exists, otherwise add it
-    const existingTrip = state.trips.find(t => t.id === invite.tripId);
-    if (existingTrip) {
-        const updatedTrip = { ...existingTrip, members: trip.members, lastModified: trip.lastModified };
-        set(s => ({ trips: s.trips.map(t => t.id === existingTrip.id ? updatedTrip : t) }));
-    } else {
-        set(s => ({ trips: [...s.trips, trip] }));
-    }
-
-    // Import activities
-    const newActivities = activityRows.map((a: any) => ({
-        id: a.id,
-        tripId: a.trip_id,
-        walletId: a.wallet_id,
-        title: a.title,
-        category: a.category,
-        date: Number(a.date),
-        time: Number(a.time),
-        endTime: a.end_time ? Number(a.end_time) : undefined,
-        allocatedBudget: Number(a.allocated_budget),
-        budgetCurrency: a.budget_currency || 'PHP',
-        isCompleted: a.is_completed,
-        lastModified: Number(a.last_modified),
-        description: a.description,
-        location: a.location,
-        countries: a.countries || [],
-        createdBy: a.created_by,
-        lastModifiedBy: a.last_modified_by,
-        expenses: [] as any[],
-        version: Number(a.version || 1),
-        updatedBy: a.updated_by || undefined,
-        deletedAt: null,
-    }));
-
-    // Import expenses
-    let newExpenses: any[] = [];
-    if (expenseRows.length) {
-        newExpenses = expenseRows.map((e: any) => ({
-            id: e.id,
-            tripId: e.trip_id,
-            walletId: e.wallet_id,
-            activityId: e.activity_id,
-            name: e.name,
-            amount: Number(e.amount),
-            currency: e.currency,
-            convertedAmountHome: Number(e.converted_amount_home),
-            convertedAmountTrip: Number(e.converted_amount_trip),
-            category: e.category,
-            time: Number(e.time),
-            date: Number(e.date),
-            originalAmount: e.original_amount ? Number(e.original_amount) : undefined,
-            originalCurrency: e.original_currency,
-            createdBy: e.created_by,
-            lastModifiedBy: e.last_modified_by,
-            version: Number(e.version || 1),
-            updatedBy: e.updated_by || undefined,
-            deletedAt: null,
-        }));
-
-        const expensesByActivity = new Map<string, any[]>();
-        newExpenses.forEach((e: any) => {
-            upsertRecord('expenses', e.id, e, { walletId: e.walletId, tripId: e.tripId, activityId: e.activityId });
-            if (!e.activityId) return;
-            const current = expensesByActivity.get(e.activityId) || [];
-            current.push(e);
-            expensesByActivity.set(e.activityId, current);
-        });
-
-        newActivities.forEach(a => {
-            a.expenses = expensesByActivity.get(a.id) || [];
-        });
-    }
-
-    // Persist activities to local DB only (no sync push)
-    newActivities.forEach(a => {
-        upsertRecord('activities', a.id, a, { tripId: a.tripId, walletId: a.walletId });
-    });
-
-    set(s => ({
-        activities: [
-            ...s.activities.filter(a => a.tripId !== invite.tripId),
-            ...newActivities,
-        ],
-        expenses: [
-            ...s.expenses.filter(e => e.tripId !== invite.tripId),
-            ...newExpenses,
-        ],
-    }));
-}

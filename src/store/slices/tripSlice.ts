@@ -8,14 +8,15 @@ import {
     fetchTripCloudBundle,
     refreshTripCloudState,
     refreshAccessibleCloudState,
+    refreshAccessibleCloudStateInBackground,
+    refreshTripCloudStateInBackground,
 } from '../cloudSyncHelpers';
 import { syncTrace, summarizeTrip, summarizeWallets } from '../../sync/debug';
-import { persistLocalTripHide, stampFieldUpdates, supabase, validateImportedTrip } from '../storeHelpers';
+import { persistLocalTripHide, stampFieldUpdates, supabase } from '../storeHelpers';
 import type { AppState } from '../useStore';
 import {
     applyTripWalletDerivedFields,
     buildNewTripPlan,
-    normalizeImportedTripMembers,
     normalizeTripWallet,
     resolveCurrentAuthUserId,
 } from './tripSlice.helpers';
@@ -31,7 +32,6 @@ export interface TripSlice {
     updateTrip: (id: string, trip: Partial<TripPlan>) => Promise<void>;
     deleteTrip: (id: string) => Promise<void>;
     toggleTripCompletion: (id: string) => Promise<void>;
-    importTrip: (tripData: any) => void;
     updateWalletBaseline: (
         tripId: string,
         walletId: string,
@@ -135,7 +135,7 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (_set,
             });
             if (error) throw error;
 
-            await refreshAccessibleCloudState();
+            refreshAccessibleCloudStateInBackground('trip_update');
         } finally {
             endTripCloudMutation(id);
         }
@@ -171,7 +171,7 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (_set,
             members: (localTrip.members || []).filter(member => member.userId !== currentUserId),
             lastModified,
         });
-        await refreshTripCloudState(id);
+            refreshTripCloudStateInBackground(id, 'trip_leave');
     },
 
     toggleTripCompletion: async (id) => {
@@ -191,56 +191,8 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (_set,
             .eq('id', id);
         if (error) throw error;
 
-        await refreshAccessibleCloudState();
+        refreshAccessibleCloudStateInBackground('trip_toggle_completion');
     },
-
-    importTrip: (tripData: any) =>
-        _set((state) => {
-            if (!validateImportedTrip(tripData)) {
-                console.error('[importTrip] Invalid trip data - schema validation failed');
-                return state;
-            }
-
-            const existingTrip = state.trips.find(trip => trip.id === tripData.id);
-            if (existingTrip && existingTrip.lastModified >= tripData.lastModified) {
-                return state;
-            }
-
-            const newActivities = (tripData.activities || []).map((activity: any) => ({ ...activity }));
-            const { activities: _ignoredActivities, ...rawTrip } = tripData;
-            const cleanTrip = {
-                ...rawTrip,
-                members: normalizeImportedTripMembers(rawTrip.members),
-            };
-            const embeddedExpenses: any[] = [];
-
-            for (const activity of newActivities) {
-                if (!activity.expenses?.length) continue;
-                for (const expense of activity.expenses) {
-                    embeddedExpenses.push({ ...expense, tripId: activity.tripId, activityId: activity.id });
-                }
-            }
-
-            if (existingTrip) {
-                return {
-                    trips: state.trips.map(trip => trip.id === tripData.id ? cleanTrip : trip),
-                    activities: [
-                        ...state.activities.filter(activity => activity.tripId !== tripData.id),
-                        ...newActivities,
-                    ],
-                    expenses: [
-                        ...state.expenses.filter(expense => expense.tripId !== tripData.id),
-                        ...embeddedExpenses,
-                    ],
-                };
-            }
-
-            return {
-                trips: [...state.trips, cleanTrip],
-                activities: [...state.activities, ...newActivities],
-                expenses: [...state.expenses, ...embeddedExpenses],
-            };
-        }),
 
     updateWalletBaseline: async (tripId, walletId, rate, source) => {
         beginTripCloudMutation(tripId);
@@ -278,7 +230,7 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (_set,
                 p_removed_wallet_ids: [],
             });
             if (error) throw error;
-            await refreshTripCloudState(tripId);
+            refreshTripCloudStateInBackground(tripId, 'wallet_baseline_update');
         } finally {
             endTripCloudMutation(tripId);
         }
@@ -307,7 +259,7 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (_set,
         });
         if (error) throw error;
 
-        await refreshTripCloudState(tripId);
+        refreshTripCloudStateInBackground(tripId, 'member_add');
         return newMember;
     },
 
@@ -318,7 +270,7 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (_set,
         });
         if (error) throw error;
 
-        await refreshTripCloudState(tripId);
+        refreshTripCloudStateInBackground(tripId, 'member_remove');
     },
 
     updateMemberRole: async (tripId, memberId, role) => {
@@ -329,7 +281,7 @@ export const createTripSlice: StateCreator<AppState, [], [], TripSlice> = (_set,
         });
         if (error) throw error;
 
-        await refreshTripCloudState(tripId);
+        refreshTripCloudStateInBackground(tripId, 'member_role_update');
     },
 
     addBuddy: async (tripId, name) => {

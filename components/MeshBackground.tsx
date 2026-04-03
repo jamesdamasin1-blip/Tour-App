@@ -10,7 +10,7 @@ import { useStore } from '@/src/store/useStore';
  * Inspired by the dreamy aurora-style reference image, adapted to sage hues.
  */
 export const MeshBackground: React.FC<{ children?: React.ReactNode; style?: any }> = ({ children, style }) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     return (

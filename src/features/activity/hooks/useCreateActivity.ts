@@ -97,6 +97,7 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
 
     const effectiveRate = activeWallet?.effectiveRate || 1;
     const activeWalletBalanceTrip = activeWallet?.balance || 0;
+    const activeWalletBalanceHome = activeWallet?.homeEquivalent ?? (activeWalletBalanceTrip * effectiveRate);
     const reclaimableTripAmount = useMemo(() => {
         if (!editingActivity?.expenses?.length || !activeWallet?.walletId) return 0;
         return editingActivity.expenses.reduce((sum, exp) => (
@@ -105,17 +106,27 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
                 : sum
         ), 0);
     }, [activeWallet?.walletId, editingActivity?.expenses]);
-    const actualCostCapacityTrip = activeWalletBalanceTrip + reclaimableTripAmount;
+    const reclaimableHomeAmount = useMemo(() => {
+        if (!editingActivity?.expenses?.length || !activeWallet?.walletId) return 0;
+        return editingActivity.expenses.reduce((sum, exp) => (
+            exp.walletId === activeWallet.walletId
+                ? sum + (exp.convertedAmountHome || 0)
+                : sum
+        ), 0);
+    }, [activeWallet?.walletId, editingActivity?.expenses]);
+    const actualWalletAvailableSelected = actualCurrency === homeCurrency
+        ? activeWalletBalanceHome
+        : activeWalletBalanceTrip;
     const actualCostCapacitySelected = actualCurrency === homeCurrency
-        ? actualCostCapacityTrip * effectiveRate
-        : actualCostCapacityTrip;
+        ? activeWalletBalanceHome + reclaimableHomeAmount
+        : activeWalletBalanceTrip + reclaimableTripAmount;
     const parsedActualCost = actualCost.trim() !== '' ? MathUtils.parseCurrencyInput(actualCost) : null;
     const actualCostValidationError = parsedActualCost !== null && parsedActualCost > actualCostCapacitySelected + 0.01
-        ? `Not enough balance in this wallet. Available: ${MathUtils.formatCurrency(actualCostCapacitySelected, actualCurrency || tripCurrency || homeCurrency)}.`
+        ? `Not enough balance in this wallet. Editable limit: ${MathUtils.formatCurrency(actualCostCapacitySelected, actualCurrency || tripCurrency || homeCurrency)}.`
         : '';
     const actualCostHelperText = (editingActivity?.expenses?.length ?? 0) > 0
-        ? `Available in wallet: ${MathUtils.formatCurrency(actualCostCapacitySelected, actualCurrency || tripCurrency || homeCurrency)}. Editing this will create a manual adjustment expense to match the total.`
-        : 'Add an expense first to enable editing the actual cost.';
+        ? `Available in wallet now: ${MathUtils.formatCurrency(actualWalletAvailableSelected, actualCurrency || tripCurrency || homeCurrency)}.${actualCostCapacitySelected > actualWalletAvailableSelected + 0.01 ? ` Editable limit: ${MathUtils.formatCurrency(actualCostCapacitySelected, actualCurrency || tripCurrency || homeCurrency)} including this activity's current expense.` : ''}`
+        : `Available in wallet now: ${MathUtils.formatCurrency(actualWalletAvailableSelected, actualCurrency || tripCurrency || homeCurrency)}. Add an expense first to enable editing the actual cost.`;
 
     // Modals
     const [isCurrencyModalVisible, setIsCurrencyModalVisible] = useState(false);
@@ -128,22 +139,33 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
     // updates to the same activity never overwrite the user's in-progress edits.
     const initRef = useRef<string | null>(null);
     const saveLockRef = useRef(false);
-    if (editingActivity && initRef.current !== editingActivity.id) {
-        initRef.current = editingActivity.id;
-        setTitle(editingActivity.title);
-        setAllocatedBudget((editingActivity.allocatedBudget || 0).toString());
-        setBudgetCurrency(editingActivity.budgetCurrency || tripCurrency);
-        setSelectedCountries(editingActivity.countries || []);
-        setCategory(editingActivity.category);
-        setDate(dayjs(editingActivity.date));
-        setStartTime(dayjs(editingActivity.time));
-        setEndTime(dayjs(editingActivity.endTime || editingActivity.time + 3600000));
-        setDescription(editingActivity.description || '');
-        setActualCurrencyState(tripCurrency);
-    } else if (!editingActivity && currentTrip && initRef.current !== currentTrip.id) {
+    const costInitRef = useRef(false);
+
+    useEffect(() => {
+        if (editingActivity) {
+            if (initRef.current === editingActivity.id) return;
+
+            initRef.current = editingActivity.id;
+            costInitRef.current = false;
+            setTitle(editingActivity.title);
+            setAllocatedBudget((editingActivity.allocatedBudget || 0).toString());
+            setBudgetCurrency(editingActivity.budgetCurrency || tripCurrency);
+            setSelectedCountries(editingActivity.countries || []);
+            setCategory(editingActivity.category);
+            setDate(dayjs(editingActivity.date));
+            setStartTime(dayjs(editingActivity.time));
+            setEndTime(dayjs(editingActivity.endTime || editingActivity.time + 3600000));
+            setDescription(editingActivity.description || '');
+            setActualCurrencyState(tripCurrency);
+            return;
+        }
+
+        if (!currentTrip || initRef.current === currentTrip.id) return;
+
         initRef.current = currentTrip.id;
+        costInitRef.current = false;
         setSelectedCountries(currentTrip.countries || []);
-    }
+    }, [currentTrip, editingActivity, tripCurrency]);
 
     useEffect(() => {
         if (!budgetAvailableCurrencies.length) return;
@@ -173,11 +195,11 @@ export const useCreateActivity = (tripId: string, activityId?: string) => {
 
     // Initialize actualCost once from calculated total — uses same ref guard
     // so sync updates never overwrite the user's typed value.
-    const costInitRef = useRef(false);
-    if (editingActivity && !costInitRef.current && calculatedTotalSpent > 0) {
+    useEffect(() => {
+        if (!editingActivity || costInitRef.current || calculatedTotalSpent <= 0) return;
         costInitRef.current = true;
         setActualCost(calculatedTotalSpent.toFixed(2));
-    }
+    }, [calculatedTotalSpent, editingActivity]);
 
     // When the user explicitly changes currency, recalculate displayed cost.
     // Wrapped in a handler so it only fires on user action, not on sync.

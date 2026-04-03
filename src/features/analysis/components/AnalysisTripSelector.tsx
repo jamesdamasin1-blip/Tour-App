@@ -39,6 +39,9 @@ export const AnalysisTripSelector = ({
                         title={item.title}
                         startDate={item.startDate}
                         endDate={item.endDate}
+                        startDateKey={item.startDateKey}
+                        endDateKey={item.endDateKey}
+                        homeCountry={item.homeCountry}
                         countries={item.countries}
                         onSelect={() => onSelectTrip(item.id)}
                         intensity={isDark ? 50 : 90}

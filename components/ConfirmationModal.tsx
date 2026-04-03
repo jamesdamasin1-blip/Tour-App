@@ -28,7 +28,7 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     cancelLabel = 'CANCEL',
     type = 'default',
 }) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     
     const confirmBgColor = type === 'delete' ? '#ef4444' : type === 'edit' ? '#3b82f6' : '#5D6D54';

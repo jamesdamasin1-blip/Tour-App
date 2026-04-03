@@ -9,15 +9,24 @@ import { getCategoryTheme } from '../src/constants/categories';
 interface CategoryCardProps {
     title: string;
     spent: number;
-    percentage: number; // 0 to 100
+    percentage: number;
     iconType?: string;
+    danger?: boolean;
 }
 
-export const CategoryCard = React.memo(({ title, spent, percentage, iconType }: CategoryCardProps) => {
-    const { theme: appTheme } = useStore();
+export const CategoryCard = React.memo(({
+    title,
+    spent,
+    percentage,
+    iconType,
+    danger = false,
+}: CategoryCardProps) => {
+    const appTheme = useStore(state => state.theme);
     const isDark = appTheme === 'dark';
-    
+
     const theme = getCategoryTheme(iconType || title);
+    const accentColor = danger ? '#ef4444' : theme.color;
+    const accentBg = danger ? 'rgba(239, 68, 68, 0.14)' : theme.bg;
     const scaleAnim = useRef(new Animated.Value(1)).current;
 
     const animateScale = (toValue: number) => {
@@ -25,14 +34,12 @@ export const CategoryCard = React.memo(({ title, spent, percentage, iconType }: 
             toValue,
             useNativeDriver: true,
             friction: 8,
-            tension: 40
+            tension: 40,
         }).start();
     };
 
     return (
-        <Animated.View
-            style={{ transform: [{ scale: scaleAnim }] }}
-        >
+        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
             <TouchableOpacity
                 activeOpacity={0.9}
                 onPressIn={() => animateScale(1.02)}
@@ -42,37 +49,47 @@ export const CategoryCard = React.memo(({ title, spent, percentage, iconType }: 
                     style={styles.container}
                     intensity={isDark ? 50 : 80}
                     borderRadius={16}
-                    backgroundColor={isDark ? "rgba(40, 44, 38, 0.6)" : "rgba(255, 255, 255, 0.4)"}
-                    borderColor={isDark ? "rgba(158, 178, 148, 0.15)" : "rgba(255, 255, 255, 0.2)"}
+                    backgroundColor={isDark ? 'rgba(40, 44, 38, 0.6)' : 'rgba(255, 255, 255, 0.4)'}
+                    borderColor={danger
+                        ? (isDark ? 'rgba(239,68,68,0.18)' : 'rgba(239,68,68,0.14)')
+                        : (isDark ? 'rgba(158, 178, 148, 0.15)' : 'rgba(255, 255, 255, 0.2)')}
                     borderWidth={1}
                     hasShadow={true}
                     shadowOpacity={0.08}
                     shadowRadius={8}
                     elevation={3}
                 >
-            <View className="p-4 flex-row items-center w-full">
-                <View
-                    className="w-12 h-12 rounded-xl items-center justify-center mr-4"
-                    style={{ backgroundColor: theme.bg, opacity: isDark ? 0.9 : 1 }}
-                >
-                    <Feather name={theme.icon as any} size={20} color={theme.color} />
-                </View>
+                    <View className="p-4 flex-row items-center w-full">
+                        <View
+                            className="w-12 h-12 rounded-xl items-center justify-center mr-4"
+                            style={{ backgroundColor: accentBg, opacity: isDark ? 0.9 : 1 }}
+                        >
+                            <Feather
+                                name={danger ? 'alert-triangle' : theme.icon as any}
+                                size={20}
+                                color={accentColor}
+                            />
+                        </View>
 
-                <View className="flex-1">
-                    <View className="flex-row justify-between items-end mb-2">
-                        <Text className={`text-base font-bold ${isDark ? 'text-[#F2F0E8]' : 'text-gray-900'}`}>{title}</Text>
+                        <View className="flex-1">
+                            <View className="flex-row justify-between items-end mb-2">
+                                <Text className={`text-base font-bold ${isDark ? 'text-[#F2F0E8]' : 'text-gray-900'}`}>
+                                    {title}
+                                </Text>
+                            </View>
+
+                            <ProgressBar
+                                progress={percentage}
+                                color={accentColor}
+                                trackColor={danger
+                                    ? (isDark ? 'rgba(239,68,68,0.14)' : 'rgba(239,68,68,0.10)')
+                                    : (isDark ? 'rgba(158, 178, 148, 0.05)' : 'rgba(158, 178, 148, 0.1)')}
+                                height={18}
+                                floatingLabel={`PHP ${spent.toLocaleString()} (${percentage}%)`}
+                                fontSize={10}
+                            />
+                        </View>
                     </View>
-
-                    <ProgressBar
-                        progress={percentage}
-                        color={theme.color}
-                        trackColor={isDark ? "rgba(158, 178, 148, 0.05)" : "rgba(158, 178, 148, 0.1)"}
-                        height={18}
-                        floatingLabel={`₱${spent.toLocaleString()} (${percentage}%)`}
-                        fontSize={10}
-                    />
-                </View>
-            </View>
                 </GlassView>
             </TouchableOpacity>
         </Animated.View>
@@ -84,5 +101,5 @@ CategoryCard.displayName = 'CategoryCard';
 const styles = StyleSheet.create({
     container: {
         marginBottom: 12,
-    }
+    },
 });

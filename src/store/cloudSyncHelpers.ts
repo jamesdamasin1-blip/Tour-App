@@ -248,6 +248,37 @@ export const refreshAccessibleCloudState = async (): Promise<void> => {
     await syncRefetchAccessibleCloudState();
 };
 
+export const refreshTripCloudStateInBackground = (tripId: string, source = 'unknown'): void => {
+    syncTrace('CloudBundle', 'refresh_background_queued', { tripId, source });
+    void refreshTripCloudState(tripId)
+        .then(() => {
+            syncTrace('CloudBundle', 'refresh_background_done', { tripId, source });
+        })
+        .catch((error: any) => {
+            syncTrace('CloudBundle', 'refresh_background_failed', {
+                tripId,
+                source,
+                message: error?.message ?? String(error),
+            });
+            console.error('[CloudBundle] Background trip refresh failed:', error);
+        });
+};
+
+export const refreshAccessibleCloudStateInBackground = (source = 'unknown'): void => {
+    syncTrace('CloudBundle', 'refresh_accessible_background_queued', { source });
+    void refreshAccessibleCloudState()
+        .then(() => {
+            syncTrace('CloudBundle', 'refresh_accessible_background_done', { source });
+        })
+        .catch((error: any) => {
+            syncTrace('CloudBundle', 'refresh_accessible_background_failed', {
+                source,
+                message: error?.message ?? String(error),
+            });
+            console.error('[CloudBundle] Background accessible refresh failed:', error);
+        });
+};
+
 const upsertTripById = (trips: TripPlan[], nextTrip: TripPlan): TripPlan[] => {
     const existingIndex = trips.findIndex(trip => trip.id === nextTrip.id);
     if (existingIndex === -1) return [...trips, nextTrip];

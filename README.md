@@ -1,50 +1,38 @@
-# Welcome to your Expo app 👋
+# Aliqual
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Aliqual is an Expo / React Native travel budget app backed by Supabase.
 
-## Get started
+## Architecture
 
-1. Install dependencies
+- Cloud-first collaboration: trips, members, activities, expenses, wallets, and funding events are written to Supabase first.
+- Local persistence is used only for device cache state and minimal device-only metadata.
+- Sharing and membership are invite-based. Raw trip import / QR payload flows are intentionally not part of the release build.
 
-   ```bash
-   npm install
-   ```
+## Environment
 
-2. Start the app
+Create a local `.env` from `.env.example` and provide:
 
-   ```bash
-   npx expo start
-   ```
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `EXPO_PUBLIC_GOOGLE_CLIENT_ID`
 
-In the output, you'll find options to open the app in a
+## Scripts
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- `npm install`
+- `npm run start`
+- `npm run android`
+- `npm run ios`
+- `npm run web`
+- `npm run lint`
+- `npx tsc --noEmit`
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Database
 
-## Get a fresh project
+Supabase schema changes live in [supabase/migrations](/E:/Tour%20App/supabase/migrations).
+Apply the latest migrations before testing invite, sync, or wallet flows.
 
-When you're ready, run:
+## Release Notes
 
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- Auth sessions are stored in secure device storage on native builds.
+- Invite acceptance refreshes the authoritative cloud bundle after membership is granted.
+- Development-only sync trace UI, QR import flows, and one-off test cleanup hooks are excluded from the release code path.

@@ -5,7 +5,7 @@ import {
     beginTripCloudMutation,
     endTripCloudMutation,
     fetchTripCloudBundle,
-    refreshTripCloudState,
+    refreshTripCloudStateInBackground,
 } from '../cloudSyncHelpers';
 import { syncTrace, summarizeFundingEvent, summarizeTrip, summarizeWallet } from '../../sync/debug';
 import { stampFieldUpdates, supabase } from '../storeHelpers';
@@ -51,8 +51,8 @@ export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEv
         if (eventErr) throw eventErr;
         syncTrace('BudgetMutation', 'rpc_add_success', summarizeFundingEvent(newEvent));
 
-        await refreshTripCloudState(eventData.tripId);
-        syncTrace('BudgetMutation', 'refresh_after_add_done', { tripId: eventData.tripId });
+        refreshTripCloudStateInBackground(eventData.tripId, 'budget_add');
+        syncTrace('BudgetMutation', 'refresh_after_add_deferred', { tripId: eventData.tripId });
         } finally {
             endTripCloudMutation(eventData.tripId);
         }
@@ -90,8 +90,8 @@ export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEv
             if (eventErr) throw eventErr;
             syncTrace('BudgetMutation', 'rpc_update_success', summarizeFundingEvent(updatedEvent));
 
-            await refreshTripCloudState(tripId);
-            syncTrace('BudgetMutation', 'refresh_after_update_done', { tripId, eventId: id });
+            refreshTripCloudStateInBackground(tripId, 'budget_update');
+            syncTrace('BudgetMutation', 'refresh_after_update_deferred', { tripId, eventId: id });
         } finally {
             endTripCloudMutation(tripId);
         }
@@ -110,8 +110,8 @@ export const createExchangeEventSlice: StateCreator<AppState, [], [], ExchangeEv
             if (eventErr) throw eventErr;
             syncTrace('BudgetMutation', 'rpc_delete_success', { tripId, eventId: id });
 
-            await refreshTripCloudState(tripId);
-            syncTrace('BudgetMutation', 'refresh_after_delete_done', { tripId, eventId: id });
+            refreshTripCloudStateInBackground(tripId, 'budget_delete');
+            syncTrace('BudgetMutation', 'refresh_after_delete_deferred', { tripId, eventId: id });
         } finally {
             endTripCloudMutation(tripId);
         }

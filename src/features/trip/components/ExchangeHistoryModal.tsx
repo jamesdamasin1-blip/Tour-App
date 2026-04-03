@@ -24,7 +24,7 @@ interface ExchangeHistoryModalProps {
 }
 
 export const ExchangeHistoryModal = ({ tripId, visible, onClose }: ExchangeHistoryModalProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const [editingEvent, setEditingEvent] = useState<ExchangeEvent | null>(null);
     const [activeTab, setActiveTab] = useState(0);
@@ -32,7 +32,15 @@ export const ExchangeHistoryModal = ({ tripId, visible, onClose }: ExchangeHisto
     const [fundsCurrencyIdx, setFundsCurrencyIdx] = useState(0);
     const scrollRef = useRef<ScrollView>(null);
 
-    const { homeCurrency, activeFundsAmount, activeFundsCurrency, movementsTimeline, spendingTimeline, walletCurrencies } =
+    const {
+        homeCurrency,
+        activeFundsAmount,
+        activeFundsCurrency,
+        activeFundsRateToHome,
+        movementsTimeline,
+        spendingTimeline,
+        walletCurrencies,
+    } =
         useExchangeHistoryData(tripId, fundsCurrencyIdx);
 
     const accentColor = isDark ? '#B2C4AA' : '#5D6D54';
@@ -110,6 +118,8 @@ export const ExchangeHistoryModal = ({ tripId, visible, onClose }: ExchangeHisto
                         >
                             <View style={{ width: containerWidth }}>
                                 <ExchangeMovementsTimeline
+                                    activeFundsCurrency={activeFundsCurrency}
+                                    activeFundsRateToHome={activeFundsRateToHome}
                                     accentColor={accentColor}
                                     defaultBg={defaultBg}
                                     groupedTimeline={movementsTimeline}
@@ -122,7 +132,6 @@ export const ExchangeHistoryModal = ({ tripId, visible, onClose }: ExchangeHisto
                                 <ExchangeSpendingTimeline
                                     accentColor={accentColor}
                                     groupedTimeline={spendingTimeline}
-                                    homeCurrency={homeCurrency}
                                     isDark={isDark}
                                 />
                             </View>

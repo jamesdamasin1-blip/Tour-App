@@ -10,6 +10,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import Constants from 'expo-constants';
 import { runSync, getSyncStatus, startSyncLoop, stopSyncLoop } from '../sync/syncEngine';
 import { getQueueStats } from '../sync/syncQueue';
+import { syncTrace, traceDuration } from '../sync/debug';
 
 const SUPABASE_URL = Constants.expoConfig?.extra?.supabaseUrl || '';
 
@@ -22,6 +23,7 @@ export const useNetworkStatus = () => {
     // Poll connectivity with a lightweight fetch
     useMountEffect(() => {
         const checkConnectivity = async () => {
+            const startedAt = Date.now();
             try {
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), 5000);
@@ -33,16 +35,24 @@ export const useNetworkStatus = () => {
 
                 if (wasOffline.current) {
                     wasOffline.current = false;
+                    syncTrace('Network', 'connectivity_restored');
                     // Connection restored — trigger immediate sync + start loop
+                    const reconnectSyncStartedAt = Date.now();
                     runSync().then(() => {
+                        traceDuration('Network', 'reconnect_sync_done', reconnectSyncStartedAt, getQueueStats());
                         setSyncStatus(getSyncStatus());
                         setQueueStats(getQueueStats());
                     }).catch(err => console.warn('[NetworkStatus] Reconnect sync failed:', err));
                     startSyncLoop();
                 }
+                traceDuration('Network', 'connectivity_check_online', startedAt);
                 setIsOnline(true);
             } catch {
+                if (!wasOffline.current) {
+                    syncTrace('Network', 'connectivity_lost');
+                }
                 wasOffline.current = true;
+                traceDuration('Network', 'connectivity_check_offline', startedAt);
                 setIsOnline(false);
                 stopSyncLoop();
             }
@@ -53,10 +63,13 @@ export const useNetworkStatus = () => {
 
         // Sync when app comes to foreground
         const handleAppState = (state: AppStateStatus) => {
+            syncTrace('Network', 'app_state_change', { state });
             if (state === 'active') {
                 setSyncStatus(getSyncStatus());
                 setQueueStats(getQueueStats());
+                const foregroundSyncStartedAt = Date.now();
                 runSync().then(() => {
+                    traceDuration('Network', 'foreground_sync_done', foregroundSyncStartedAt, getQueueStats());
                     setSyncStatus(getSyncStatus());
                     setQueueStats(getQueueStats());
                 }).catch(err => console.warn('[NetworkStatus] Foreground sync failed:', err));
@@ -73,7 +86,10 @@ export const useNetworkStatus = () => {
 
     const triggerSync = async () => {
         if (!isOnline) return { pushed: 0, pulled: 0 };
+        const startedAt = Date.now();
+        syncTrace('Network', 'manual_trigger_sync');
         const result = await runSync();
+        traceDuration('Network', 'manual_trigger_sync_done', startedAt, result);
         setSyncStatus(getSyncStatus());
         setQueueStats(getQueueStats());
         return result;

@@ -18,7 +18,7 @@ interface DurationPickerModalProps {
 }
 
 export const DurationPickerModal = ({ visible, onClose, startDate, endDate, onDatesChange }: DurationPickerModalProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     return (

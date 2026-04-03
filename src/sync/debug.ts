@@ -1,4 +1,9 @@
-const TRACE_ENABLED = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
+const TRACE_ENABLED =
+    typeof __DEV__ !== 'undefined'
+        ? __DEV__ && process.env.EXPO_PUBLIC_ENABLE_SYNC_TRACE === '1'
+        : false;
+const TRACE_CONSOLE_ENABLED = false;
+const TRACE_EMIT_BATCH_MS = 180;
 const MAX_TRACE_ENTRIES = 120;
 
 export type SyncTraceEntry = {
@@ -6,16 +11,26 @@ export type SyncTraceEntry = {
     ts: number;
     scope: string;
     event: string;
-    message: string;
     data?: unknown;
 };
 
+export const isSyncTraceEnabled = (): boolean => TRACE_ENABLED;
+
 let traceEntries: SyncTraceEntry[] = [];
 const listeners = new Set<(entries: SyncTraceEntry[]) => void>();
+let emitTimer: ReturnType<typeof setTimeout> | null = null;
 
 const emitTraceEntries = () => {
     const snapshot = [...traceEntries];
     listeners.forEach(listener => listener(snapshot));
+};
+
+const scheduleTraceEntriesEmit = () => {
+    if (emitTimer) return;
+    emitTimer = setTimeout(() => {
+        emitTimer = null;
+        emitTraceEntries();
+    }, TRACE_EMIT_BATCH_MS);
 };
 
 const safeNum = (value: unknown, fallback = 0): number => {
@@ -25,34 +40,6 @@ const safeNum = (value: unknown, fallback = 0): number => {
 
 const round4 = (value: unknown): number => Number(safeNum(value).toFixed(4));
 
-export const syncTrace = (scope: string, event: string, data?: unknown): void => {
-    if (!TRACE_ENABLED) return;
-    const message = data === undefined
-        ? `[TRACE][${scope}] ${event}`
-        : `[TRACE][${scope}] ${event} ${safeStringify(data)}`;
-    const entry: SyncTraceEntry = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        ts: Date.now(),
-        scope,
-        event,
-        message,
-        data,
-    };
-    traceEntries = [...traceEntries, entry].slice(-MAX_TRACE_ENTRIES);
-    emitTraceEntries();
-
-    if (data === undefined) {
-        console.log(message);
-        return;
-    }
-
-    try {
-        console.log(message);
-    } catch {
-        console.log(`[TRACE][${scope}] ${event}`, data);
-    }
-};
-
 const safeStringify = (data: unknown): string => {
     try {
         return JSON.stringify(data);
@@ -61,11 +48,68 @@ const safeStringify = (data: unknown): string => {
     }
 };
 
+const baseTraceMessage = (scope: string, event: string): string => `[TRACE][${scope}] ${event}`;
+
+export const formatSyncTraceEntryMessage = (entry: SyncTraceEntry): string => {
+    const message = baseTraceMessage(entry.scope, entry.event);
+    if (entry.data === undefined) return message;
+    return `${message} ${safeStringify(entry.data)}`;
+};
+
+export const syncTrace = (scope: string, event: string, data?: unknown): void => {
+    if (!TRACE_ENABLED) return;
+    const entry: SyncTraceEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        ts: Date.now(),
+        scope,
+        event,
+        data,
+    };
+    traceEntries.push(entry);
+    if (traceEntries.length > MAX_TRACE_ENTRIES) {
+        traceEntries.splice(0, traceEntries.length - MAX_TRACE_ENTRIES);
+    }
+    scheduleTraceEntriesEmit();
+
+    if (!TRACE_CONSOLE_ENABLED) return;
+
+    const message = baseTraceMessage(scope, event);
+    if (data === undefined) {
+        console.log(message);
+        return;
+    }
+
+    try {
+        console.log(message, data);
+    } catch {
+        console.log(message);
+    }
+};
+
+export const traceDuration = (
+    scope: string,
+    event: string,
+    startedAt: number,
+    data?: Record<string, unknown>
+): number => {
+    const elapsedMs = Math.max(0, Date.now() - startedAt);
+    syncTrace(scope, event, {
+        ...(data || {}),
+        elapsedMs,
+    });
+    return elapsedMs;
+};
+
 export const getSyncTraceEntries = (): SyncTraceEntry[] => [...traceEntries];
 
 export const subscribeSyncTraceEntries = (
     listener: (entries: SyncTraceEntry[]) => void
 ): (() => void) => {
+    if (!TRACE_ENABLED) {
+        listener([]);
+        return () => {};
+    }
+
     listeners.add(listener);
     listener(getSyncTraceEntries());
     return () => {
@@ -74,11 +118,17 @@ export const subscribeSyncTraceEntries = (
 };
 
 export const clearSyncTraceEntries = (): void => {
+    if (!TRACE_ENABLED) return;
+    if (emitTimer) {
+        clearTimeout(emitTimer);
+        emitTimer = null;
+    }
     traceEntries = [];
     emitTraceEntries();
 };
 
 export const summarizeWallet = (wallet: any) => {
+    if (!TRACE_ENABLED) return undefined;
     const lots = Array.isArray(wallet?.lots) ? wallet.lots : [];
     return {
         id: wallet?.id,
@@ -100,9 +150,10 @@ export const summarizeWallet = (wallet: any) => {
 };
 
 export const summarizeWallets = (wallets: any[] | undefined | null) =>
-    (wallets ?? []).map(summarizeWallet);
+    TRACE_ENABLED ? (wallets ?? []).map(summarizeWallet) : undefined;
 
 export const summarizeTrip = (trip: any) => {
+    if (!TRACE_ENABLED) return null;
     if (!trip) return null;
     return {
         id: trip?.id,
@@ -114,6 +165,7 @@ export const summarizeTrip = (trip: any) => {
 };
 
 export const summarizeActivity = (activity: any) => {
+    if (!TRACE_ENABLED) return null;
     if (!activity) return null;
     return {
         id: activity?.id,
@@ -126,7 +178,7 @@ export const summarizeActivity = (activity: any) => {
 };
 
 export const summarizeExpenses = (expenses: any[] | undefined | null) =>
-    (expenses ?? []).map(expense => ({
+    TRACE_ENABLED ? (expenses ?? []).map(expense => ({
         id: expense?.id,
         tripId: expense?.tripId ?? expense?.trip_id,
         walletId: expense?.walletId ?? expense?.wallet_id,
@@ -136,9 +188,10 @@ export const summarizeExpenses = (expenses: any[] | undefined | null) =>
         hasLotBreakdown: Array.isArray(expense?.lotBreakdown ?? expense?.lot_breakdown)
             ? (expense?.lotBreakdown ?? expense?.lot_breakdown).length > 0
             : false,
-    }));
+    })) : undefined;
 
 export const summarizeFundingEvent = (event: any) => {
+    if (!TRACE_ENABLED) return null;
     if (!event) return null;
     return {
         id: event?.id,
@@ -153,9 +206,10 @@ export const summarizeFundingEvent = (event: any) => {
 };
 
 export const summarizeFundingEvents = (events: any[] | undefined | null) =>
-    (events ?? []).map(summarizeFundingEvent);
+    TRACE_ENABLED ? (events ?? []).map(summarizeFundingEvent) : undefined;
 
 export const summarizeRealtimePayload = (payload: any) => {
+    if (!TRACE_ENABLED) return null;
     const row = payload?.new ?? payload?.old ?? null;
     return {
         eventType: payload?.eventType ?? 'UNKNOWN',

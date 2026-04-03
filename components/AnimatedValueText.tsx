@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, StyleProp, TextProps, TextStyle } from 'react-native';
+import { Animated, Platform, StyleProp, Text, TextProps, TextStyle } from 'react-native';
 
 type AnimatedValueTextProps = TextProps & {
     text: string;
     freezeWhile?: boolean;
     settleMs?: number;
+    animated?: boolean;
     style?: StyleProp<TextStyle>;
 };
 
@@ -12,6 +13,7 @@ export function AnimatedValueText({
     text,
     freezeWhile = false,
     settleMs = 140,
+    animated = Platform.OS !== 'android',
     style,
     ...textProps
 }: AnimatedValueTextProps) {
@@ -20,6 +22,18 @@ export function AnimatedValueText({
     const [displayedText, setDisplayedText] = useState(text);
 
     useEffect(() => {
+        if (!animated) {
+            if (displayedText !== text) {
+                setDisplayedText(text);
+            }
+            return () => {
+                if (settleTimerRef.current) {
+                    clearTimeout(settleTimerRef.current);
+                    settleTimerRef.current = null;
+                }
+            };
+        }
+
         if (settleTimerRef.current) {
             clearTimeout(settleTimerRef.current);
             settleTimerRef.current = null;
@@ -52,7 +66,15 @@ export function AnimatedValueText({
                 settleTimerRef.current = null;
             }
         };
-    }, [anim, displayedText, freezeWhile, settleMs, text]);
+    }, [anim, animated, displayedText, freezeWhile, settleMs, text]);
+
+    if (!animated) {
+        return (
+            <Text {...textProps} style={style}>
+                {text}
+            </Text>
+        );
+    }
 
     return (
         <Animated.Text

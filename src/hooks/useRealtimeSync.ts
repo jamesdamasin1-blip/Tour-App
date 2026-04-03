@@ -42,6 +42,22 @@ const resetReconnectState = (tripId: string) => {
     delete sharedReconnectAttempts[tripId];
 };
 
+export const sendDeleteRequestBroadcast = (req: DeletionRequest) => {
+    sharedChannels[req.tripId]?.send({
+        type: 'broadcast',
+        event: 'delete_request',
+        payload: req,
+    });
+};
+
+export const sendDeleteRequestCancelledBroadcast = (tripId: string, requestId: string) => {
+    sharedChannels[tripId]?.send({
+        type: 'broadcast',
+        event: 'delete_request_resolved',
+        payload: { requestId },
+    });
+};
+
 // ─── Dispatch helpers ────────────────────────────────────────────
 
 /** Read a minimal state snapshot for handler consumption — no subscriptions. */
@@ -97,18 +113,6 @@ export const useRealtimeSync = () => {
         if (!channel) return;
         void supabase.removeChannel(channel);
         delete channels[tripId];
-    }, [channels]);
-
-    const sendDeleteRequest = useCallback((req: DeletionRequest) => {
-        channels[req.tripId]?.send({
-            type: 'broadcast', event: 'delete_request', payload: req,
-        });
-    }, [channels]);
-
-    const sendDeleteRequestCancelled = useCallback((tripId: string, requestId: string) => {
-        channels[tripId]?.send({
-            type: 'broadcast', event: 'delete_request_resolved', payload: { requestId },
-        });
     }, [channels]);
 
     const subscribeToTrip = useCallback((tripId: string) => {
@@ -187,11 +191,16 @@ export const useRealtimeSync = () => {
                     scheduleReconnect('TIMED_OUT');
                 }
                 if (status === 'SUBSCRIBED') {
+                    const isReconnect = (sharedReconnectAttempts[tripId] ?? 0) > 0;
                     resetReconnectState(tripId);
-                    // Small delay avoids race with subscription setup
-                    setTimeout(() => runSync().catch(err =>
-                        console.warn(`[Realtime] Reconnect sync failed for ${tripId}:`, err)
-                    ), 100);
+                    if (isReconnect) {
+                        // Small delay avoids race with subscription setup.
+                        setTimeout(() => runSync().catch(syncErr =>
+                            console.warn(`[Realtime] Reconnect sync failed for ${tripId}:`, syncErr)
+                        ), 100);
+                    } else {
+                        syncTrace('RealtimeHook', 'subscribed_initial', { tripId });
+                    }
                 }
             });
 
@@ -254,5 +263,9 @@ export const useRealtimeSync = () => {
         };
     });
 
-    return { subscribeToTrip, sendDeleteRequest, sendDeleteRequestCancelled };
+    return {
+        subscribeToTrip,
+        sendDeleteRequest: sendDeleteRequestBroadcast,
+        sendDeleteRequestCancelled: sendDeleteRequestCancelledBroadcast,
+    };
 };

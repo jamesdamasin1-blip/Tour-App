@@ -3,6 +3,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import dayjs from 'dayjs';
 import { useStore } from '@/src/store/useStore';
 import { Calculations as MathUtils } from '@/src/utils/mathUtils';
+import { buildTripDateFields } from '@/src/utils/tripDates';
 import { buildTripDisplayFields } from '@/src/utils/tripDisplayFields';
 import { COUNTRY_CURRENCY_MAPPING } from '@/src/data/currencyMapping';
 import { syncTrace } from '@/src/sync/debug';
@@ -45,8 +46,8 @@ export const useCreatePlan = () => {
             setTitle(trip.title);
             setHomeCountry(trip.homeCountry || 'Philippines');
             setHomeCurrency(COUNTRY_CURRENCY_MAPPING[trip.homeCountry || 'Philippines'] || 'PHP');
-            setStartDate(dayjs(trip.startDate));
-            setEndDate(dayjs(trip.endDate));
+            setStartDate(dayjs(trip.startDateKey || trip.startDate));
+            setEndDate(dayjs(trip.endDateKey || trip.endDate));
             setCountries(trip.countries || []);
 
             const budgets: { [c: string]: string } = {};
@@ -202,10 +203,13 @@ export const useCreatePlan = () => {
         });
 
         const tripDisplayFields = buildTripDisplayFields(wallets as any, homeCurrency);
+        const tripDateFields = buildTripDateFields(startDate, endDate);
         const tripData: any = {
             title: title.trim(),
-            startDate: startDate!.valueOf(),
-            endDate: endDate!.valueOf(),
+            startDate: tripDateFields.startDate,
+            endDate: tripDateFields.endDate,
+            startDateKey: tripDateFields.startDateKey,
+            endDateKey: tripDateFields.endDateKey,
             countries,
             homeCountry,
             homeCurrency,

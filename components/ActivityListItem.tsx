@@ -45,7 +45,8 @@ export const ActivityListItem = React.memo(({
     onEdit,
     onToggleComplete,
 }: ActivityListItemProps) => {
-    const { theme, trips } = useStore();
+    const theme = useStore(state => state.theme);
+    const trips = useStore(state => state.trips);
     const isDark = theme === 'dark';
 
     const [isSummaryVisible, setIsSummaryVisible] = useState(false);
@@ -81,8 +82,8 @@ export const ActivityListItem = React.memo(({
     const spendPercentage = allocatedBudgetHome > 0 && Number.isFinite(totalSpentHome) && Number.isFinite(allocatedBudgetHome)
         ? Math.round((totalSpentHome / allocatedBudgetHome) * 100)
         : 0;
-        
-    const safeSpendPercentage = Math.min(Math.max(spendPercentage || 0, 0), 100);
+    const displaySpendPercentage = Math.max(spendPercentage || 0, 0);
+    const progressSpendPercentage = Math.min(displaySpendPercentage, 100);
 
     const varianceHome = Math.abs(allocatedBudgetHome - totalSpentHome);
     const isOverBudget = totalSpentHome > allocatedBudgetHome;
@@ -288,6 +289,7 @@ export const ActivityListItem = React.memo(({
                                                         ? MathUtils.formatCurrency(totalSpentHome, homeCurrency)
                                                         : MathUtils.formatCurrency(varianceHome, homeCurrency)
                                                 }
+                                                animated={false}
                                                 style={[styles.statusAmount, { color: isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54') }]}
                                             />
                                         </View>
@@ -298,6 +300,7 @@ export const ActivityListItem = React.memo(({
                                             </Text>
                                             <AnimatedValueText
                                                 text={MathUtils.formatCurrency(allocatedBudgetHome, homeCurrency)}
+                                                animated={false}
                                                 style={[styles.statusAmount, { color: isDark ? '#B2C4AA' : '#5D6D54' }]}
                                             />
                                         </View>
@@ -314,7 +317,8 @@ export const ActivityListItem = React.memo(({
                                         marginTop: 4
                                     }}>
                                         <ProgressBar
-                                            progress={activity.isSpontaneous ? 100 : safeSpendPercentage}
+                                            progress={activity.isSpontaneous ? 100 : progressSpendPercentage}
+                                            animated={false}
                                             color={isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54')}
                                             trackColor="transparent"
                                             height={24}
@@ -322,7 +326,7 @@ export const ActivityListItem = React.memo(({
                                             floatingLabel={
                                                 activity.isSpontaneous
                                                     ? MathUtils.formatCurrency(totalSpentHome, homeCurrency)
-                                                    : `${MathUtils.formatCurrency(totalSpentHome, homeCurrency)} / ${MathUtils.formatCurrency(allocatedBudgetHome, homeCurrency)} (${safeSpendPercentage}%)`
+                                                    : `${MathUtils.formatCurrency(totalSpentHome, homeCurrency)} / ${MathUtils.formatCurrency(allocatedBudgetHome, homeCurrency)} (${displaySpendPercentage}%)`
                                             }
                                         />
                                     </View>
@@ -376,6 +380,25 @@ const styles = StyleSheet.create({
     title: { fontSize: 16, fontWeight: '900', color: '#111827', flex: 1 },
     subtitle: { fontSize: 10, fontWeight: '700', color: '#6b7280', marginTop: 2, opacity: 0.8 },
     headerRight: { alignItems: 'flex-end' },
+    requestBadge: {
+        minWidth: 28,
+        height: 24,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(239,68,68,0.16)',
+        backgroundColor: 'rgba(239,68,68,0.08)',
+        paddingHorizontal: 7,
+        marginBottom: 5,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+    },
+    requestBadgeText: {
+        fontSize: 10,
+        fontWeight: '900',
+        color: '#ef4444',
+    },
     statusLabel: { fontSize: 8, fontWeight: '900', letterSpacing: 0.5, marginBottom: 1 },
     statusAmount: { fontSize: 12, fontWeight: '900' },
     backgroundIconContainer: { position: 'absolute', right: -25, top: -62, width: 180, zIndex: 0 },

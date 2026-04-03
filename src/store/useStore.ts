@@ -46,3 +46,28 @@ registerStoreBridge<AppState>({
     getState: useStore.getState,
     setState: useStore.setState,
 });
+
+export const clearPersistedAppState = async (): Promise<void> => {
+    const preservedTheme = useStore.getState().theme;
+
+    await useStore.persist.clearStorage();
+
+    useStore.setState({
+        trips: [],
+        activities: [],
+        expenses: [],
+        exchangeEvents: [],
+        invites: [],
+        inviteLoading: false,
+        currencyRates: {
+            timestamp: 0,
+            rates: { MYR: null, SGD: null, PHP: 1 },
+        },
+        theme: preservedTheme,
+        walletError: null,
+        currentUserId: null,
+        deletionRequests: [],
+        isTripsSidebarOpen: false,
+        tripMutationCounts: {},
+    });
+};

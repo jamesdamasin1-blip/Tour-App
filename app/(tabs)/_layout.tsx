@@ -8,7 +8,6 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '@/src/store/useStore';
-import { useRealtimeSync } from '@/src/hooks/useRealtimeSync';
 import { AddBuddyModal } from '@/components/AddBuddyModal';
 import { GlassView } from '@/components/GlassView';
 import { AnimatedModal } from '@/components/AnimatedModal';
@@ -35,14 +34,12 @@ function CustomTabBarButton({ onPress }: { onPress: () => void }) {
 
 export default function TabLayout() {
     const insets = useSafeAreaInsets();
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const router = useRouter();
 
     const [isFabModalOpen, setIsFabModalOpen] = useState(false);
     const [isAddBuddyOpen, setIsAddBuddyOpen] = useState(false);
-
-    useRealtimeSync();
 
     const fabActions = [
         {

@@ -9,7 +9,7 @@ interface SectionHeaderProps {
 }
 
 export const SectionHeader = React.memo(({ title, actionLabel, onAction }: SectionHeaderProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     return (

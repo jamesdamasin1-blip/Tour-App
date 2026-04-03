@@ -24,7 +24,7 @@ const VIEWS = [
 ];
 
 export const TotalSpendingCarousel = React.memo(({ totals, totalBudget, currency }: Props) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const [activeIndex, setActiveIndex] = useState(0);
 

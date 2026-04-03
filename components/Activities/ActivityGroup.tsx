@@ -21,7 +21,7 @@ const BADGE = {
 export const ActivityGroup = React.memo(({
     type, activities, onPress, onEdit, onDelete, onToggleComplete,
 }: Props) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const badge = BADGE[type];
 

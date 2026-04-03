@@ -63,7 +63,7 @@ export const GlassView: React.FC<GlassViewProps> = ({
     style,
     ...props
 }) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
 
     const defaultBg = isDark ? 'rgba(40, 44, 38, 0.85)' : 'rgba(255, 255, 255, 0.85)';

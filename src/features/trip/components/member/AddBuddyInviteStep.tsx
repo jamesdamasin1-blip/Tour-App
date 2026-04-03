@@ -1,10 +1,7 @@
 import { RippleButton } from '@/components/RippleButton';
 import { Feather } from '@expo/vector-icons';
-import QRCode from 'react-native-qrcode-svg';
 import React from 'react';
 import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
-
-type Step = 'qr' | 'code' | 'email';
 
 type AddBuddyInviteStepProps = {
     email: string;
@@ -14,13 +11,10 @@ type AddBuddyInviteStepProps = {
     isAuthenticated: boolean;
     isDark: boolean;
     isSendingInvite: boolean;
-    qrPayload: string;
-    step: Step;
     onChangeEmail: (value: string) => void;
     onInviteAnother: () => void;
     onSelectRole: (role: 'editor' | 'viewer') => void;
     onSendInvite: () => void;
-    onShareCode: () => void;
 };
 
 export function AddBuddyInviteStep({
@@ -31,49 +25,11 @@ export function AddBuddyInviteStep({
     isAuthenticated,
     isDark,
     isSendingInvite,
-    qrPayload,
-    step,
     onChangeEmail,
     onInviteAnother,
     onSelectRole,
     onSendInvite,
-    onShareCode,
 }: AddBuddyInviteStepProps) {
-    if (step === 'qr') {
-        return (
-            <View style={{ alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, fontWeight: '500', color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 16 }}>
-                    {'Ask them to open the app and scan this QR from the "+" menu on their My Trips screen'}
-                </Text>
-                <View style={{ padding: 16, backgroundColor: '#FFF', borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 }}>
-                    <QRCode value={qrPayload || 'empty'} size={180} color="#111827" backgroundColor="transparent" />
-                </View>
-                <TouchableOpacity onPress={onShareCode} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 14, marginTop: 16, backgroundColor: isDark ? '#B2C4AA' : '#5D6D54' }}>
-                    <Feather name="share" size={14} color={isDark ? '#1A1C18' : '#fff'} style={{ marginRight: 6 }} />
-                    <Text style={{ fontSize: 13, fontWeight: '900', color: isDark ? '#1A1C18' : '#fff', letterSpacing: 0.5 }}>
-                        ALSO SHARE AS TEXT
-                    </Text>
-                </TouchableOpacity>
-            </View>
-        );
-    }
-
-    if (step === 'code') {
-        return (
-            <View style={{ alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, fontWeight: '500', color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 16 }}>
-                    {'Share this invite code with them. They can paste it via the "+" menu on their My Trips screen.'}
-                </Text>
-                <TouchableOpacity onPress={onShareCode} style={{ paddingVertical: 14, paddingHorizontal: 24, borderRadius: 16, alignItems: 'center', backgroundColor: isDark ? '#B2C4AA' : '#5D6D54', width: '100%' }}>
-                    <Feather name="share" size={16} color={isDark ? '#1A1C18' : '#fff'} />
-                    <Text style={{ fontSize: 13, fontWeight: '900', letterSpacing: 1.5, color: isDark ? '#1A1C18' : '#fff', marginTop: 6 }}>
-                        SHARE INVITE CODE
-                    </Text>
-                </TouchableOpacity>
-            </View>
-        );
-    }
-
     if (!isAuthenticated) {
         return (
             <View style={{ alignItems: 'center', paddingVertical: 12 }}>
@@ -82,7 +38,7 @@ export function AddBuddyInviteStep({
                     Sign in required
                 </Text>
                 <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginTop: 4 }}>
-                    You need to be signed in to send email invites. Use QR or invite code instead.
+                    Sign in to send cloud invites.
                 </Text>
             </View>
         );
@@ -95,10 +51,10 @@ export function AddBuddyInviteStep({
                     <Feather name="check" size={24} color={isDark ? '#B2C4AA' : '#5D6D54'} />
                 </View>
                 <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#F2F0E8' : '#111827', marginTop: 12 }}>
-                    Invite sent!
+                    Invite sent
                 </Text>
                 <Text style={{ fontSize: 11, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginTop: 4 }}>
-                    {"They'll see it when they open the app. You can also share a code as backup."}
+                    They&apos;ll receive it inside the app after signing in with that email.
                 </Text>
                 <TouchableOpacity onPress={onInviteAnother} style={{ paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12, marginTop: 16, backgroundColor: isDark ? 'rgba(158, 178, 148, 0.12)' : 'rgba(93, 109, 84, 0.08)' }}>
                     <Text style={{ fontSize: 11, fontWeight: '800', color: isDark ? '#B2C4AA' : '#5D6D54', letterSpacing: 0.5 }}>
@@ -112,7 +68,7 @@ export function AddBuddyInviteStep({
     return (
         <View>
             <Text style={{ fontSize: 13, fontWeight: '500', color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', marginBottom: 12 }}>
-                {"Enter their email. They'll see the invite when they open the app."}
+                Enter the email tied to their Aliqual account.
             </Text>
             <TextInput
                 value={email}

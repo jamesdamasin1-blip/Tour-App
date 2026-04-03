@@ -42,6 +42,8 @@ export function mapTripFromDb(row: Record<string, any>): Partial<TripPlan> & { i
         base.startDate = safeNum(row.start_date);
     if ('end_date' in row && row.end_date && safeNum(row.end_date) > 0)
         base.endDate = safeNum(row.end_date);
+    if ('start_date_key' in row) base.startDateKey = row.start_date_key ?? undefined;
+    if ('end_date_key' in row) base.endDateKey = row.end_date_key ?? undefined;
     if ('home_country' in row) base.homeCountry = row.home_country;
     if ('home_currency' in row) base.homeCurrency = row.home_currency;
     if ('total_budget_home_cached' in row)
@@ -82,6 +84,8 @@ export function mapTripToDb(data: Partial<TripPlan> & { id: string }): Record<st
         destination: data.destination,
         start_date: data.startDate,
         end_date: data.endDate,
+        start_date_key: data.startDateKey,
+        end_date_key: data.endDateKey,
         home_country: data.homeCountry,
         home_currency: data.homeCurrency,
         wallets: data.wallets,

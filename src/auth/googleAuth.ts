@@ -3,10 +3,12 @@
  * Manages user state: anonymous → authenticated.
  * Local data is NEVER overwritten on login.
  */
-import { supabase } from '../utils/supabase';
+import { clearPersistedSupabaseSession, supabase } from '../utils/supabase';
 import * as WebBrowser from 'expo-web-browser';
 import { getSyncMeta, setSyncMeta, clearAllUserData } from '../storage/localDB';
 import { generateId } from '../utils/mathUtils';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearPersistedAppState } from '../store/useStore';
 
 WebBrowser.maybeCompleteAuthSession();
 const AUTH_DEBUG_LOGS = false;
@@ -48,7 +50,7 @@ export const getAuthState = async (): Promise<AuthState> => {
             const isPermanent = msg.includes('refresh token') || msg.includes('invalid') || msg.includes('expired');
             if (isPermanent) {
                 console.warn('[Auth] Permanent session error, clearing session:', error.message);
-                await supabase.auth.signOut().catch(() => {});
+                await clearPersistedSupabaseSession().catch(() => {});
             } else {
                 console.warn('[Auth] Transient session error (not signing out):', error.message);
             }
@@ -198,7 +200,20 @@ export const signInWithGoogle = async (): Promise<AuthState> => {
 
 /** Sign out — clears sensitive session data */
 export const signOut = async (clearLocalData = false): Promise<AuthState> => {
-    await supabase.auth.signOut();
+    try {
+        await supabase.auth.signOut();
+    } finally {
+        if (clearLocalData) {
+            const asyncKeys = await AsyncStorage.getAllKeys();
+            const keysToRemove = asyncKeys.filter(key =>
+                key === 'aliqual-storage' || /^sb-.*-auth-token$/.test(key)
+            );
+
+            if (keysToRemove.length > 0) {
+                await AsyncStorage.multiRemove(keysToRemove);
+            }
+        }
+    }
 
     // Clear auth-related metadata
     setSyncMeta('linkedUserId', '');
@@ -206,6 +221,7 @@ export const signOut = async (clearLocalData = false): Promise<AuthState> => {
     // Optionally clear all user data (full logout)
     if (clearLocalData) {
         clearAllUserData();
+        await clearPersistedAppState();
     }
 
     return getAuthState();

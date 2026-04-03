@@ -53,7 +53,7 @@ export const CurrencyInput = ({
     options,
     onCurrencyPress
 }: CurrencyInputProps) => {
-    const { theme } = useStore();
+    const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const [isMenuVisible, setIsMenuVisible] = useState(false);
     const [toggleLayout, setToggleLayout] = useState({ x: 0, y: 0, width: 0, height: 0 });

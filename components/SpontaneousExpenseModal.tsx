@@ -105,8 +105,19 @@ export const SpontaneousExpenseModal = ({
                 : sum
         ), 0);
     }, [initialActivity?.expenses, selectedWalletId]);
+    const reclaimableHomeAmount = useMemo(() => {
+        if (!initialActivity?.expenses?.length || !selectedWalletId) return 0;
+        return initialActivity.expenses.reduce((sum, expense) => (
+            expense.walletId === selectedWalletId
+                ? sum + (expense.convertedAmountHome || 0)
+                : sum
+        ), 0);
+    }, [initialActivity?.expenses, selectedWalletId]);
 
-    const availableTripBalance = (activeWallet?.balance || 0) + reclaimableTripAmount;
+    const currentWalletTripBalance = activeWallet?.balance || 0;
+    const currentWalletHomeBalance = activeWallet?.homeEquivalent ?? (currentWalletTripBalance * effectiveRate);
+    const editableTripCapacity = currentWalletTripBalance + reclaimableTripAmount;
+    const editableHomeCapacity = currentWalletHomeBalance + reclaimableHomeAmount;
 
     useEffect(() => {
         if (!visible) {
@@ -178,14 +189,19 @@ export const SpontaneousExpenseModal = ({
         };
     }, [amount, currencyRates, effectiveRate, homeCurrency, selectedCurrency, tripCurrency]);
 
-    const availableBalanceSelected = selectedCurrency === homeCurrency
-        ? availableTripBalance * effectiveRate
-        : availableTripBalance;
-    const amountExceedsWallet = conversions.trip > availableTripBalance + 0.01;
+    const currentWalletSelectedBalance = selectedCurrency === homeCurrency
+        ? currentWalletHomeBalance
+        : currentWalletTripBalance;
+    const editableSelectedCapacity = selectedCurrency === homeCurrency
+        ? editableHomeCapacity
+        : editableTripCapacity;
+    const amountExceedsWallet = conversions.trip > editableTripCapacity + 0.01;
     const amountValidationError = amountExceedsWallet
-        ? `Amount exceeds available ${selectedCurrency} ${availableBalanceSelected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+        ? `Amount exceeds editable limit ${selectedCurrency} ${editableSelectedCapacity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
         : '';
-    const amountHelperText = `Available in wallet: ${selectedCurrency} ${availableBalanceSelected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
+    const amountHelperText = reclaimableTripAmount > 0
+        ? `Available in wallet now: ${selectedCurrency} ${currentWalletSelectedBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Editable limit: ${selectedCurrency} ${editableSelectedCapacity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+        : `Available in wallet now: ${selectedCurrency} ${currentWalletSelectedBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
 
     const handleLog = async () => {
         if (isSaving || !title || !amount || !selectedWalletId) return;

@@ -1,25 +1,22 @@
 import { ConfirmationModal } from '@/components/ConfirmationModal';
 import { Header } from '@/components/Header';
-import { JoinTripModal } from '@/components/JoinTripModal';
 import { MeshBackground } from '@/components/MeshBackground';
-import { PendingInviteBanner } from '@/components/PendingInviteBanner';
-import { QRScannerModal } from '@/components/QRScannerModal';
 import { TripCard } from '@/components/TripCard';
 import { TripShareModal } from '@/components/TripShareModal';
 import { getFundingTotalGlobalHome } from '@/src/finance/wallet/walletEngine';
+import { buildInboxItems } from '@/src/features/inbox/inboxItems';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useNavigationGuard } from '@/src/hooks/useNavigationGuard';
 import { TripsEmptyState } from '@/src/features/trips/components/TripsEmptyState';
 import { TripsSidebar } from '@/src/features/trips/components/TripsSidebar';
 import { TAB_BAR_HEIGHT } from '@/src/features/trips/constants';
-import { useOneTimeTestTripCleanup } from '@/src/features/trips/hooks/useOneTimeTestTripCleanup';
+import { sendDeleteRequestCancelledBroadcast } from '@/src/hooks/useRealtimeSync';
 import { useStore } from '@/src/store/useStore';
-import type { TripPlan } from '@/src/types/models';
-import { base64Decode } from '@/src/utils/base64';
-import { Calculations } from '@/src/utils/mathUtils';
+import { syncTrace } from '@/src/sync/debug';
+import type { TripInvite, TripPlan } from '@/src/types/models';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
     Animated,
@@ -40,23 +37,28 @@ export default function TripsListScreen() {
     const trips = useStore(state => state.trips);
     const expenses = useStore(state => state.expenses);
     const deleteTrip = useStore(state => state.deleteTrip);
+    const deleteActivity = useStore(state => state.deleteActivity);
     const theme = useStore(state => state.theme);
     const toggleTheme = useStore(state => state.toggleTheme);
-    const importTrip = useStore(state => state.importTrip);
-    const addMember = useStore(state => state.addMember);
     const setTripsSidebarOpen = useStore(state => state.setTripsSidebarOpen);
+    const isTripsSidebarRequestedOpen = useStore(state => state.isTripsSidebarOpen);
+    const acceptInvite = useStore(state => state.acceptInvite);
+    const declineInvite = useStore(state => state.declineInvite);
+    const invites = useStore(state => state.invites);
+    const deletionRequests = useStore(state => state.deletionRequests);
+    const removeDeletionRequest = useStore(state => state.removeDeletionRequest);
     const router = useRouter();
-    const { logout, userId, displayName, email: userEmail } = useAuth();
+    const { logout, displayName, email: userEmail } = useAuth();
     const { safeNavigate } = useNavigationGuard();
     const insets = useSafeAreaInsets();
     const isDark = theme === 'dark';
 
     const [deletingTripId, setDeletingTripId] = useState<string | null>(null);
     const [sharingTrip, setSharingTrip] = useState<TripPlan | null>(null);
-    const [isScannerVisible, setIsScannerVisible] = useState(false);
-    const [isJoinModalVisible, setIsJoinModalVisible] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isLogoutConfirmVisible, setIsLogoutConfirmVisible] = useState(false);
+    const [processingInviteId, setProcessingInviteId] = useState<string | null>(null);
+    const [processingDeleteRequestId, setProcessingDeleteRequestId] = useState<string | null>(null);
 
     const pushAnim = useRef(new Animated.Value(0)).current;
     const userInitial = (displayName || userEmail || '?')[0].toUpperCase();
@@ -71,7 +73,15 @@ export default function TripsListScreen() {
         return totals;
     }, [expenses]);
 
-    useOneTimeTestTripCleanup({ trips, deleteTrip, setTripsSidebarOpen });
+    const pendingInvites = useMemo(
+        () => invites.filter(invite => invite.status === 'pending'),
+        [invites]
+    );
+    const inboxItems = useMemo(
+        () => buildInboxItems(pendingInvites, deletionRequests),
+        [deletionRequests, pendingInvites]
+    );
+    const headerInboxCount = deletionRequests.length > 0 ? deletionRequests.length : inboxItems.length;
 
     const openSidebar = useCallback(() => {
         setTripsSidebarOpen(true);
@@ -93,6 +103,16 @@ export default function TripsListScreen() {
             easing: Easing.out(Easing.quad),
         }).start(() => setIsSidebarOpen(false));
     }, [pushAnim, setTripsSidebarOpen]);
+
+    useEffect(() => {
+        if (isTripsSidebarRequestedOpen && !isSidebarOpen) {
+            openSidebar();
+            return;
+        }
+        if (!isTripsSidebarRequestedOpen && isSidebarOpen) {
+            closeSidebar();
+        }
+    }, [closeSidebar, isSidebarOpen, isTripsSidebarRequestedOpen, openSidebar]);
 
     const sidebarPanResponder = useMemo(() => PanResponder.create({
         onMoveShouldSetPanResponder: (_event, gestureState) => (
@@ -133,68 +153,63 @@ export default function TripsListScreen() {
         setDeletingTripId(null);
     }, [deleteTrip, deletingTripId]);
 
-    const handleJoinTrip = useCallback(async (code: string) => {
-        try {
-            const tripData = JSON.parse(base64Decode(code));
-            if (!tripData?.id) throw new Error('Invalid data');
-
-            importTrip(tripData);
-
-            if (userId) {
-                const members = tripData.members || [];
-                const isAlreadyMember = members.some((member: any) =>
-                    member.userId === userId ||
-                    member.email?.toLowerCase() === userEmail?.toLowerCase()
-                );
-
-                if (!isAlreadyMember) {
-                    const { BUDDY_COLORS } = await import('@/src/types/models');
-                    const { supabase } = await import('@/src/store/storeHelpers');
-                    const usedColors = members.map((member: any) => member.color);
-                    const memberColor = BUDDY_COLORS.find(
-                        (color: string) => !usedColors.includes(color)
-                    ) || BUDDY_COLORS[members.length % BUDDY_COLORS.length];
-                    const memberName = displayName || userEmail?.split('@')[0] || 'Me';
-                    const { data: rpcResult, error: rpcError } = await supabase.rpc('join_trip', {
-                        p_trip_id: tripData.id,
-                        p_member_name: memberName,
-                        p_member_color: memberColor,
-                    });
-
-                    if (rpcError) console.warn('[JoinTrip] RPC failed:', rpcError.message);
-                    if (rpcResult?.members) {
-                        useStore.setState(state => ({
-                            trips: state.trips.map(trip => (
-                                trip.id === tripData.id
-                                    ? { ...trip, members: rpcResult.members, lastModified: Date.now() }
-                                    : trip
-                            )),
-                        }));
-                    } else {
-                        addMember(tripData.id, memberName, {
-                            userId,
-                            email: userEmail || undefined,
-                        });
-                    }
-                }
-            }
-
-            router.push(`/trip/${tripData.id}` as any);
-        } catch {
-            Alert.alert('Error', 'Invalid trip code or QR data.');
-        }
-    }, [addMember, displayName, importTrip, router, userEmail, userId]);
-
     const handleLogout = useCallback(async () => {
         setIsLogoutConfirmVisible(false);
         closeSidebar();
         try {
-            await logout(false);
+            await logout(true);
             router.replace('/(auth)/entry' as any);
         } catch {
             Alert.alert('Error', 'Failed to sign out. Please try again.');
         }
     }, [closeSidebar, logout, router]);
+
+    const handleAcceptInvite = useCallback(async (invite: TripInvite) => {
+        setProcessingInviteId(invite.id);
+        try {
+            const tripId = await acceptInvite(invite.id);
+            closeSidebar();
+            if (tripId) {
+                router.push(`/trip/${tripId}` as any);
+            }
+        } catch (error: any) {
+            Alert.alert('Failed to join', error?.message || 'Something went wrong. Please try again.');
+        } finally {
+            setProcessingInviteId(null);
+        }
+    }, [acceptInvite, closeSidebar, router]);
+
+    const handleDeclineInvite = useCallback(async (invite: TripInvite) => {
+        setProcessingInviteId(invite.id);
+        try {
+            await declineInvite(invite.id);
+        } catch (error: any) {
+            Alert.alert('Error', error?.message || 'Failed to decline invite.');
+        } finally {
+            setProcessingInviteId(null);
+        }
+    }, [declineInvite]);
+
+    const handleApproveDeleteRequest = useCallback(async (request: typeof deletionRequests[number]) => {
+        setProcessingDeleteRequestId(request.id);
+        try {
+            deleteActivity(request.activityId);
+            removeDeletionRequest(request.id);
+            sendDeleteRequestCancelledBroadcast(request.tripId, request.id);
+        } finally {
+            setProcessingDeleteRequestId(null);
+        }
+    }, [deleteActivity, removeDeletionRequest]);
+
+    const handleRejectDeleteRequest = useCallback(async (request: typeof deletionRequests[number]) => {
+        setProcessingDeleteRequestId(request.id);
+        try {
+            removeDeletionRequest(request.id);
+            sendDeleteRequestCancelledBroadcast(request.tripId, request.id);
+        } finally {
+            setProcessingDeleteRequestId(null);
+        }
+    }, [removeDeletionRequest]);
 
     const renderEmptyComponent = useCallback(
         () => <TripsEmptyState isDark={isDark} />,
@@ -216,7 +231,6 @@ export default function TripsListScreen() {
         const canToggleDisplayCurrency = baselineCurrency !== homeCurrency && primaryRate > 0;
         const budgetDisplay = canToggleDisplayCurrency ? budgetHome / primaryRate : budgetHome;
         const spentDisplay = canToggleDisplayCurrency ? spentHome / primaryRate : spentHome;
-
         return (
             <TripCard
                 id={item.id}
@@ -224,6 +238,9 @@ export default function TripsListScreen() {
                 countries={item.countries}
                 startDate={item.startDate}
                 endDate={item.endDate}
+                startDateKey={item.startDateKey}
+                endDateKey={item.endDateKey}
+                homeCountry={item.homeCountry}
                 budget={budgetDisplay}
                 spent={spentDisplay}
                 homeBudget={budgetHome}
@@ -231,7 +248,14 @@ export default function TripsListScreen() {
                 homeCurrency={homeCurrency}
                 tripCurrency={canToggleDisplayCurrency ? baselineCurrency : homeCurrency}
                 isCompleted={item.isCompleted}
-                onPress={() => safeNavigate(() => router.push(`/trip/${item.id}` as any))}
+                onPress={() => safeNavigate(() => {
+                    syncTrace('TripsList', 'open_trip_press', {
+                        tripId: item.id,
+                        title: item.title,
+                        walletCount: item.wallets?.length || 0,
+                    });
+                    router.push(`/trip/${item.id}` as any);
+                })}
                 onLongPress={() => setSharingTrip(item)}
                 onDelete={setDeletingTripId}
                 onEdit={(id) => router.push(`/create-plan?editId=${id}` as any)}
@@ -239,15 +263,7 @@ export default function TripsListScreen() {
         );
     }, [expenseTotalsByTrip, router, safeNavigate]);
 
-    const listHeader = useMemo(
-        () => (
-            <>
-                <View style={{ height: 16 }} />
-                <PendingInviteBanner />
-            </>
-        ),
-        []
-    );
+    const listHeader = useMemo(() => <View style={{ height: 16 }} />, []);
 
     return (
         <View style={{ flex: 1, backgroundColor: sidebarBg, overflow: 'hidden' }}>
@@ -261,7 +277,15 @@ export default function TripsListScreen() {
                 userInitial={userInitial}
                 displayName={displayName}
                 userEmail={userEmail}
+                pendingInvites={pendingInvites}
+                deletionRequests={deletionRequests}
+                processingInviteId={processingInviteId}
+                processingDeleteRequestId={processingDeleteRequestId}
                 sidebarPanHandlers={sidebarPanResponder.panHandlers}
+                onAcceptInvite={handleAcceptInvite}
+                onDeclineInvite={handleDeclineInvite}
+                onApproveDeleteRequest={handleApproveDeleteRequest}
+                onRejectDeleteRequest={handleRejectDeleteRequest}
                 onToggleTheme={toggleTheme}
                 onSignOut={() => {
                     closeSidebar();
@@ -284,6 +308,48 @@ export default function TripsListScreen() {
                                 />
                             </TouchableOpacity>
                         )}
+                        rightElement={headerInboxCount > 0 ? (
+                            <TouchableOpacity
+                                onPress={openSidebar}
+                                activeOpacity={0.85}
+                                style={{
+                                    width: 42,
+                                    height: 42,
+                                    borderRadius: 14,
+                                    backgroundColor: isDark ? 'rgba(178,196,170,0.12)' : 'rgba(93,109,84,0.08)',
+                                    borderWidth: 1,
+                                    borderColor: isDark ? 'rgba(178,196,170,0.18)' : 'rgba(93,109,84,0.14)',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                }}
+                            >
+                                <Feather
+                                    name="message-circle"
+                                    size={18}
+                                    color={isDark ? '#B2C4AA' : '#5D6D54'}
+                                />
+                                <View style={{
+                                    position: 'absolute',
+                                    top: -3,
+                                    right: -3,
+                                    minWidth: 18,
+                                    height: 18,
+                                    borderRadius: 9,
+                                    backgroundColor: '#ef4444',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingHorizontal: 4,
+                                }}>
+                                    <Animated.Text style={{
+                                        color: '#fff',
+                                        fontSize: 9,
+                                        fontWeight: '900',
+                                    }}>
+                                        {headerInboxCount}
+                                    </Animated.Text>
+                                </View>
+                            </TouchableOpacity>
+                        ) : undefined}
                     />
 
                     <FlatList
@@ -292,6 +358,10 @@ export default function TripsListScreen() {
                         renderItem={renderItem}
                         ListHeaderComponent={listHeader}
                         ListEmptyComponent={renderEmptyComponent}
+                        initialNumToRender={6}
+                        maxToRenderPerBatch={6}
+                        windowSize={5}
+                        removeClippedSubviews
                         contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingBottom: 120 }}
                         bounces={false}
                         overScrollMode="never"
@@ -343,25 +413,9 @@ export default function TripsListScreen() {
                 onClose={() => setIsLogoutConfirmVisible(false)}
                 onConfirm={handleLogout}
                 title="Sign Out?"
-                description="Your local data will be kept on this device. You can sign back in anytime."
+                description="This signs you out and clears locally cached trip data from this device."
                 type="delete"
                 confirmLabel="SIGN OUT"
-            />
-
-            <QRScannerModal
-                isVisible={isScannerVisible}
-                onClose={() => setIsScannerVisible(false)}
-                onScan={(data) => {
-                    setIsScannerVisible(false);
-                    void handleJoinTrip(data);
-                }}
-            />
-
-            <JoinTripModal
-                visible={isJoinModalVisible}
-                onClose={() => setIsJoinModalVisible(false)}
-                onScanQR={() => setIsScannerVisible(true)}
-                onJoinWithCode={handleJoinTrip}
             />
         </View>
     );

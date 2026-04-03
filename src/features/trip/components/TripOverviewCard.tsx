@@ -11,6 +11,7 @@ import { runOnJS } from 'react-native-reanimated';
 type TripOverviewCardProps = {
     balanceDetail?: string;
     balanceFormatted: string;
+    balanceRatio: number;
     budgetDisplayHome: boolean;
     completedActivitiesCount: number;
     homeCurrency: string;
@@ -34,6 +35,7 @@ type TripOverviewCardProps = {
 export function TripOverviewCard({
     balanceDetail,
     balanceFormatted,
+    balanceRatio,
     budgetDisplayHome,
     completedActivitiesCount,
     homeCurrency,
@@ -62,6 +64,8 @@ export function TripOverviewCard({
     const settledWalletBudgetHome = useSettledValue(totalWalletBudgetHome, isTripFinancialSyncing);
     const settledWalletBudgetTrip = useSettledValue(totalWalletBudgetTrip, isTripFinancialSyncing);
     const settledIsOverBudget = settledCommittedHome > settledWalletBudgetHome;
+    const walletValueColor = getWalletTone(balanceRatio, isDark);
+    const walletLabelColor = getWalletLabelTone(balanceRatio, isDark);
 
     return (
         <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
@@ -88,6 +92,7 @@ export function TripOverviewCard({
                         </View>
                         <ProgressBar
                             progress={settledOverallProgress}
+                            animated={false}
                             gradientColors={isDark ? ['#9EB294', '#5D6D54'] : ['#B5C0A2', '#5D6D54']}
                             trackColor={isDark ? 'rgba(158, 178, 148, 0.05)' : 'rgba(158, 178, 148, 0.2)'}
                             height={24}
@@ -144,31 +149,42 @@ export function TripOverviewCard({
                             >
                                 <View style={{ alignItems: 'flex-end', justifyContent: 'center', width: '100%' }}>
                                     <View style={{ height: 14, justifyContent: 'center' }}>
-                                        <Text className={`text-[10px] font-black uppercase tracking-[1.5px] ${isDark ? 'text-[#9EB294]' : 'text-[#6B7280]'}`} numberOfLines={1}>
+                                        <Text
+                                            numberOfLines={1}
+                                            style={{
+                                                fontSize: 10,
+                                                fontWeight: '900',
+                                                letterSpacing: 1.5,
+                                                textTransform: 'uppercase',
+                                                color: walletLabelColor,
+                                            }}
+                                        >
                                             WALLET
                                         </Text>
                                     </View>
                                     <View style={{ height: 30, justifyContent: 'center' }}>
                                         <AnimatedValueText
                                             text={balanceFormatted}
+                                            animated={false}
                                             freezeWhile={isTripFinancialSyncing}
                                             settleMs={180}
                                             numberOfLines={1}
                                             adjustsFontSizeToFit
                                             minimumFontScale={0.5}
-                                            style={{ fontSize: 22, fontWeight: '900', color: isDark ? '#B2C4AA' : '#5D6D54' }}
+                                            style={{ fontSize: 22, fontWeight: '900', color: walletValueColor }}
                                         />
                                     </View>
                                     <View style={{ height: 11, justifyContent: 'center' }}>
                                         <AnimatedValueText
                                             text={balanceDetail || ' '}
+                                            animated={false}
                                             freezeWhile={isTripFinancialSyncing}
                                             settleMs={180}
                                             numberOfLines={1}
                                             style={{
                                                 fontSize: 7,
                                                 fontWeight: '700',
-                                                color: isDark ? '#9EB294' : '#9ca3af',
+                                                color: walletLabelColor,
                                                 letterSpacing: 0.5,
                                                 opacity: balanceDetail ? 0.8 : 0,
                                                 textTransform: 'uppercase',
@@ -241,6 +257,45 @@ export function TripOverviewCard({
             </GlassView>
         </View>
     );
+}
+
+function getWalletTone(balanceRatio: number, isDark: boolean): string {
+    const safeRatio = Math.max(0, Math.min(balanceRatio, 1));
+    const emptyColor = isDark ? '#F87171' : '#DC2626';
+    const healthyColor = isDark ? '#B2C4AA' : '#5D6D54';
+    return mixHex(emptyColor, healthyColor, safeRatio);
+}
+
+function getWalletLabelTone(balanceRatio: number, isDark: boolean): string {
+    const safeRatio = Math.max(0, Math.min(balanceRatio, 1));
+    const emptyColor = isDark ? '#FCA5A5' : '#EF4444';
+    const healthyColor = isDark ? '#9EB294' : '#6B7280';
+    return mixHex(emptyColor, healthyColor, safeRatio);
+}
+
+function mixHex(start: string, end: string, ratio: number): string {
+    const safeRatio = Math.max(0, Math.min(ratio, 1));
+    const startRgb = hexToRgb(start);
+    const endRgb = hexToRgb(end);
+
+    const mixed = startRgb.map((channel, index) =>
+        Math.round(channel + ((endRgb[index] - channel) * safeRatio))
+    );
+
+    return `#${mixed.map(channel => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+    const normalized = hex.replace('#', '');
+    const fullHex = normalized.length === 3
+        ? normalized.split('').map(part => `${part}${part}`).join('')
+        : normalized;
+
+    return [
+        parseInt(fullHex.slice(0, 2), 16),
+        parseInt(fullHex.slice(2, 4), 16),
+        parseInt(fullHex.slice(4, 6), 16),
+    ];
 }
 
 type BudgetSummaryBarProps = {

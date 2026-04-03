@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React from 'react';
 import { View, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Text, Modal, ActivityIndicator } from 'react-native';
 import { BottomFade } from '../components/BottomFade';
 import { RippleButton } from '../components/RippleButton';
@@ -23,11 +23,11 @@ import {
     PRIMARY_ACTION_RADIUS,
     PRIMARY_ACTION_TEXT_SIZE,
 } from '../src/styles/primaryAction';
+import { getTripDatePickerDate } from '../src/utils/tripDates';
 
 export default function CreateActivityScreen() {
     const { tripId, activityId } = useLocalSearchParams<{ tripId: string, activityId: string }>();
     const insets = useSafeAreaInsets();
-    const [showBottomFade, setShowBottomFade] = useState(false);
     
     const {
         // State & Actions
@@ -60,14 +60,6 @@ export default function CreateActivityScreen() {
         hasExpenses,
     } = useCreateActivity(tripId, activityId);
 
-    const handleScroll = useCallback((event: any) => {
-        const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-        const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 40;
-        const isScrollable = contentSize.height > layoutMeasurement.height;
-        setShowBottomFade(isScrollable && !isCloseToBottom);
-    }, []);
-
-
     return (
         <MeshBackground>
             <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -87,8 +79,6 @@ export default function CreateActivityScreen() {
                     contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12, paddingBottom: insets.bottom + 80 }}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
-                    onScroll={handleScroll}
-                    scrollEventThrottle={16}
                 >
                     <GlassView intensity={isDark ? 50 : 80} borderRadius={32} style={{ padding: 2 }}>
                         <ActivityFormDetails
@@ -175,12 +165,13 @@ export default function CreateActivityScreen() {
                 </ScrollView>
             </KeyboardAvoidingView>
 
-            <BottomFade visible={showBottomFade} height={190} />
+            <BottomFade visible height={190} />
 
             {/* Modals */}
 
             {/* Date Picker Modal */}
-            <Modal transparent visible={showDatePicker} animationType="fade">
+            {showDatePicker ? (
+            <Modal transparent visible animationType="fade">
                 <View style={{ flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 24 }}>
                     <View style={{
                         backgroundColor: isDark ? '#282C26' : 'rgba(242, 240, 228, 0.98)',
@@ -197,13 +188,13 @@ export default function CreateActivityScreen() {
                         </View>
                         <DateTimePicker
                             mode="single"
-                            date={date?.toDate() || (currentTrip?.startDate ? new Date(currentTrip.startDate) : new Date())}
+                            date={date?.toDate() || getTripDatePickerDate(currentTrip?.startDateKey, currentTrip?.startDate, currentTrip?.homeCountry) || new Date()}
                             onChange={(params) => {
                                 if (params.date) setDate(dayjs(params.date));
                                 setShowDatePicker(false);
                             }}
-                            minDate={currentTrip?.startDate ? new Date(currentTrip.startDate) : undefined}
-                            maxDate={currentTrip?.endDate ? new Date(currentTrip.endDate) : undefined}
+                            minDate={getTripDatePickerDate(currentTrip?.startDateKey, currentTrip?.startDate, currentTrip?.homeCountry) || undefined}
+                            maxDate={getTripDatePickerDate(currentTrip?.endDateKey, currentTrip?.endDate, currentTrip?.homeCountry) || undefined}
                             components={{
                                 IconPrev: <Feather name="chevron-left" size={20} color={isDark ? '#B2C4AA' : '#5D6D54'} />,
                                 IconNext: <Feather name="chevron-right" size={20} color={isDark ? '#B2C4AA' : '#5D6D54'} />,
@@ -231,9 +222,10 @@ export default function CreateActivityScreen() {
                     </View>
                 </View>
             </Modal>
+            ) : null}
 
             {/* Time Pickers */}
-            <GlassTimePicker
+            {showStartTimePicker ? <GlassTimePicker
                 visible={showStartTimePicker}
                 onClose={() => setShowStartTimePicker(false)}
                 onChange={(time) => {
@@ -246,9 +238,9 @@ export default function CreateActivityScreen() {
                 }}
                 value={startTime || (date ? date.hour(9).minute(0) : dayjs().hour(9).minute(0))}
                 title="Start Time"
-            />
+            /> : null}
 
-            <GlassTimePicker
+            {showEndTimePicker ? <GlassTimePicker
                 visible={showEndTimePicker}
                 onClose={() => setShowEndTimePicker(false)}
                 onChange={(time) => {
@@ -256,7 +248,7 @@ export default function CreateActivityScreen() {
                 }}
                 value={endTime || dayjs()}
                 title="End Time"
-            />
+            /> : null}
         </MeshBackground>
     );
 }
