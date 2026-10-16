@@ -25,10 +25,12 @@ import {
     PRIMARY_ACTION_RADIUS,
     PRIMARY_ACTION_TEXT_SIZE,
 } from '@/src/styles/primaryAction';
+import { useKeyboardInset } from '@/src/hooks/useKeyboardInset';
 
 export default function AddExpenseScreen() {
     const activityId = useLocalSearchParams<{ activityId: string }>().activityId;
     const insets = useSafeAreaInsets();
+    const keyboardInset = useKeyboardInset();
     const [showBottomFade, setShowBottomFade] = useState(false);
     
     const {
@@ -66,14 +68,21 @@ export default function AddExpenseScreen() {
     return (
         <MeshBackground>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={styles.container}
             >
                 <Header title="ADD AN EXPENSE" showBack={true} showThemeToggle={false} />
 
                 <ScrollView 
-                    contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 24, paddingBottom: insets.bottom + 40 }} 
+                    contentContainerStyle={{
+                        flexGrow: 1,
+                        paddingHorizontal: 24,
+                        paddingVertical: 24,
+                        paddingBottom: insets.bottom + 64 + keyboardInset,
+                    }} 
                     showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                     onScroll={handleScroll}
                     scrollEventThrottle={16}
                 >

@@ -7,6 +7,8 @@ import { useStore } from '../src/store/useStore';
 interface BottomFadeProps {
     visible: boolean;
     height?: number;
+    bottomOffset?: number;
+    opacity?: number;
 }
 
 const BOTTOM_FADE_OVERLAP = 28;
@@ -15,7 +17,12 @@ const BOTTOM_FADE_OVERLAP = 28;
  * A LinearGradient scroll-fade overlay anchored to the screen bottom.
  * Replaces a ~30-line pattern duplicated across index, analysis, and trip detail screens.
  */
-export const BottomFade: React.FC<BottomFadeProps> = ({ visible, height = 260 }) => {
+export const BottomFade: React.FC<BottomFadeProps> = ({
+    visible,
+    height = 260,
+    bottomOffset = 0,
+    opacity = 1,
+}) => {
     const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
     const insets = useSafeAreaInsets();
@@ -27,11 +34,12 @@ export const BottomFade: React.FC<BottomFadeProps> = ({ visible, height = 260 })
             pointerEvents="none"
             style={{
                 position: 'absolute',
-                bottom: 0,
+                bottom: bottomOffset,
                 left: 0,
                 right: 0,
                 height: height + insets.bottom + BOTTOM_FADE_OVERLAP,
                 zIndex: 5,
+                opacity,
             }}
         >
             <LinearGradient

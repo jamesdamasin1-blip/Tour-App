@@ -6,8 +6,9 @@ import { getDeviceId } from '../../auth/googleAuth';
 import {
     beginTripCloudMutation,
     endTripCloudMutation,
-    refreshTripCloudStateInBackground,
+    refreshTripCloudState,
 } from '../cloudSyncHelpers';
+import { isAlreadyDeletedCloudError } from '../cloudMutationErrors';
 import { stampFieldUpdates } from '../storeHelpers';
 import type { AppState } from '../useStore';
 
@@ -63,10 +64,7 @@ const hasMeaningfulExpenseChanges = (
     for (let index = 0; index < nextExpenses.length; index += 1) {
         const currentSignature = toExpenseSyncSignature(currentExpenses[index]);
         const nextSignature = toExpenseSyncSignature(nextExpenses[index]);
-
-        if (JSON.stringify(currentSignature) !== JSON.stringify(nextSignature)) {
-            return true;
-        }
+        if (JSON.stringify(currentSignature) !== JSON.stringify(nextSignature)) return true;
     }
 
     return false;
@@ -102,6 +100,14 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
             lastDeviceId: deviceId,
             fieldUpdates: stampFieldUpdates({}, activityData),
         };
+
+        // Optimistic insert — instant feedback, rollback on RPC failure
+        set(s => ({
+            activities: [...s.activities, newActivity as any],
+            ...(finalExpenses.length > 0 ? { expenses: [...s.expenses, ...finalExpenses] } : {}),
+        }));
+        let rpcSucceeded = false;
+
         try {
             const { supabase } = await import('../../utils/supabase');
             const { error } = await supabase.rpc('save_activity_bundle', {
@@ -112,8 +118,19 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
                 console.error('[Activity] Add failed:', error);
                 throw error;
             }
-
-            refreshTripCloudStateInBackground(activityData.tripId, 'activity_add');
+            rpcSucceeded = true;
+            // Await so isTripFinancialSyncing stays true until server state is in store
+            await refreshTripCloudState(activityData.tripId);
+        } catch (error) {
+            if (!rpcSucceeded) {
+                set(s => ({
+                    activities: s.activities.filter(a => a.id !== activityId),
+                    ...(finalExpenses.length > 0 ? {
+                        expenses: s.expenses.filter(e => !finalExpenses.some((fe: any) => fe.id === e.id)),
+                    } : {}),
+                }));
+            }
+            throw error;
         } finally {
             endTripCloudMutation(activityData.tripId);
         }
@@ -125,29 +142,40 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
         if (!activity) return;
         beginTripCloudMutation(activity.tripId);
 
-        try {
-            const trip = state.trips.find(t => t.id === activity.tripId);
-            const lastModified = Date.now();
-            const deviceId = getDeviceId();
-            
-            const finalExpenses: Expense[] = activityData.expenses
-                ? activityData.expenses.map((exp: any) =>
-                    withConvertedAmounts(exp, trip, !!activityData.recalculateExpenses)
-                  )
-                : activity.expenses;
+        const trip = state.trips.find(t => t.id === activity.tripId);
+        const lastModified = Date.now();
+        const deviceId = getDeviceId();
 
-            const fieldUpdates = stampFieldUpdates(activity.fieldUpdates, activityData, lastModified, ['expenses', 'recalculateExpenses']);
-            const nextActivity = {
-                ...activity,
-                ...activityData,
-                lastModified,
-                lastDeviceId: deviceId,
-                fieldUpdates,
-            };
-            const shouldSyncExpenses = hasMeaningfulExpenseChanges(
-                activity.expenses || [],
-                activityData.expenses ? finalExpenses : null
-            );
+        const finalExpenses: Expense[] = activityData.expenses
+            ? activityData.expenses.map((exp: any) =>
+                withConvertedAmounts(exp, trip, !!activityData.recalculateExpenses)
+              )
+            : activity.expenses;
+
+        const fieldUpdates = stampFieldUpdates(activity.fieldUpdates, activityData, lastModified, ['expenses', 'recalculateExpenses']);
+        const nextActivity = {
+            ...activity,
+            ...activityData,
+            lastModified,
+            lastDeviceId: deviceId,
+            fieldUpdates,
+            expenses: finalExpenses,
+        };
+        const shouldSyncExpenses = hasMeaningfulExpenseChanges(
+            activity.expenses || [],
+            activityData.expenses ? finalExpenses : null
+        );
+
+        // Optimistic update
+        set(s => ({
+            activities: s.activities.map(a => a.id === id ? nextActivity as any : a),
+            ...(shouldSyncExpenses ? {
+                expenses: [...s.expenses.filter(e => e.activityId !== id), ...finalExpenses],
+            } : {}),
+        }));
+        let rpcSucceeded = false;
+
+        try {
             const { supabase } = await import('../../utils/supabase');
             const { error: actErr } = await supabase.rpc('save_activity_bundle', {
                 p_activity: nextActivity,
@@ -157,8 +185,18 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
                 console.error('[Activity] Update failed:', actErr);
                 throw actErr;
             }
-
-            refreshTripCloudStateInBackground(activity.tripId, 'activity_update');
+            rpcSucceeded = true;
+            await refreshTripCloudState(activity.tripId);
+        } catch (error) {
+            if (!rpcSucceeded) {
+                set(s => ({
+                    activities: s.activities.map(a => a.id === id ? activity as any : a),
+                    ...(shouldSyncExpenses ? {
+                        expenses: [...s.expenses.filter(e => e.activityId !== id), ...activity.expenses],
+                    } : {}),
+                }));
+            }
+            throw error;
         } finally {
             endTripCloudMutation(activity.tripId);
         }
@@ -168,18 +206,43 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
         const activity = get().activities.find(a => a.id === id);
         if (!activity) return;
         beginTripCloudMutation(activity.tripId);
+        const deviceId = getDeviceId();
+
+        // Save expenses for rollback before removing
+        const activityExpenses = get().expenses.filter(e => e.activityId === id);
+
+        // Optimistic remove
+        set(s => ({
+            activities: s.activities.filter(a => a.id !== id),
+            expenses: s.expenses.filter(e => e.activityId !== id),
+        }));
+        let rpcSucceeded = false;
 
         try {
             const { supabase } = await import('../../utils/supabase');
             const { error } = await supabase.rpc('delete_activity_cascade', {
                 p_activity_id: id,
+                p_last_device_id: deviceId,
             });
             if (error) {
+                if (isAlreadyDeletedCloudError(error, 'activity')) {
+                    rpcSucceeded = true;
+                    await refreshTripCloudState(activity.tripId);
+                    return;
+                }
                 console.error('[Activity] Delete failed:', error);
                 throw error;
             }
-
-            refreshTripCloudStateInBackground(activity.tripId, 'activity_delete');
+            rpcSucceeded = true;
+            await refreshTripCloudState(activity.tripId);
+        } catch (error) {
+            if (!rpcSucceeded) {
+                set(s => ({
+                    activities: [...s.activities, activity as any],
+                    expenses: [...s.expenses, ...activityExpenses],
+                }));
+            }
+            throw error;
         } finally {
             endTripCloudMutation(activity.tripId);
         }
@@ -191,6 +254,13 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
         if (!activity) return;
         beginTripCloudMutation(activity.tripId);
 
+        // Optimistic toggle — wallet balance stays frozen via isTripFinancialSyncing
+        // until refreshTripCloudState returns with server-computed FIFO lots
+        set(s => ({
+            activities: s.activities.map(a => a.id === id ? { ...a, isCompleted: !a.isCompleted } : a),
+        }));
+        let rpcSucceeded = false;
+
         try {
             const { supabase } = await import('../../utils/supabase');
             const { error } = await supabase.rpc('toggle_activity_completion', {
@@ -200,8 +270,16 @@ export const createActivitySlice: StateCreator<AppState, [], [], ActivitySlice> 
                 console.error('[Activity] Toggle completion failed:', error);
                 throw error;
             }
-
-            refreshTripCloudStateInBackground(activity.tripId, 'activity_toggle_completion');
+            rpcSucceeded = true;
+            await refreshTripCloudState(activity.tripId);
+        } catch (error) {
+            if (!rpcSucceeded) {
+                // Restore original isCompleted on failure
+                set(s => ({
+                    activities: s.activities.map(a => a.id === id ? { ...a, isCompleted: activity.isCompleted } : a),
+                }));
+            }
+            throw error;
         } finally {
             endTripCloudMutation(activity.tripId);
         }

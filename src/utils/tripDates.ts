@@ -3,6 +3,7 @@ import { COUNTRY_TIMEZONE_MAPPING, DEFAULT_TRIP_TIMEZONE } from '../data/country
 
 const TRIP_DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TRIP_DATE_KEY_FORMAT = 'YYYY-MM-DD';
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
 type TripDateInput = Dayjs | Date | string | number | null | undefined;
 
@@ -34,8 +35,21 @@ const formatPartsToKey = (parts: Intl.DateTimeFormatPart[]) => {
 export const getTripTimeZone = (homeCountry?: string | null) =>
     COUNTRY_TIMEZONE_MAPPING[homeCountry || ''] || DEFAULT_TRIP_TIMEZONE;
 
+const isRealTripDateKey = (value: string) => {
+    if (!TRIP_DATE_KEY_PATTERN.test(value)) return false;
+
+    const [year, month, day] = value.split('-').map(Number);
+    const candidate = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+
+    return (
+        candidate.getUTCFullYear() === year &&
+        candidate.getUTCMonth() === month - 1 &&
+        candidate.getUTCDate() === day
+    );
+};
+
 export const isTripDateKey = (value: unknown): value is string =>
-    typeof value === 'string' && TRIP_DATE_KEY_PATTERN.test(value);
+    typeof value === 'string' && isRealTripDateKey(value);
 
 export const getTripDateKeyFromTimestamp = (
     timestamp: number | null | undefined,
@@ -64,6 +78,7 @@ export const resolveTripDateKey = (
 export const toTripDateKey = (value: TripDateInput) => {
     if (!value) return null;
     if (isTripDateKey(value)) return value;
+    if (typeof value === 'string' && TRIP_DATE_KEY_PATTERN.test(value)) return null;
 
     const parsed = dayjs(value);
     if (!parsed.isValid()) return null;
@@ -160,10 +175,10 @@ export const getTripDurationDays = (
     const resolvedEnd = resolveTripDateKey(endDateKey, endDate, homeCountry);
 
     if (resolvedStart && resolvedEnd) {
-        const start = dayjs(resolvedStart, TRIP_DATE_KEY_FORMAT, true);
-        const end = dayjs(resolvedEnd, TRIP_DATE_KEY_FORMAT, true);
-        if (start.isValid() && end.isValid()) {
-            return Math.max(end.diff(start, 'day') + 1, 1);
+        const start = getUtcAnchorDate(resolvedStart);
+        const end = getUtcAnchorDate(resolvedEnd);
+        if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())) {
+            return Math.max(Math.round((end.getTime() - start.getTime()) / MS_PER_DAY) + 1, 1);
         }
     }
 

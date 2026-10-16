@@ -6,12 +6,14 @@ type FooterTopFadeProps = {
     isDark: boolean;
     top?: number;
     height?: number;
+    opacity?: number;
 };
 
 export function FooterTopFade({
     isDark,
     top = -42,
     height = 94,
+    opacity = 1,
 }: FooterTopFadeProps) {
     return (
         <View
@@ -22,6 +24,7 @@ export function FooterTopFade({
                 left: 0,
                 right: 0,
                 height,
+                opacity,
             }}
         >
             <LinearGradient

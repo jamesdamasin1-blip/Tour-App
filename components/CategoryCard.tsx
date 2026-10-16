@@ -1,8 +1,8 @@
 import { GlassView } from '@/components/GlassView';
 import { ProgressBar } from '@/components/ProgressBar';
 import { Feather } from '@expo/vector-icons';
-import React, { useRef } from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useRef } from 'react';
+import { Animated, LayoutChangeEvent, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useStore } from '../src/store/useStore';
 import { getCategoryTheme } from '../src/constants/categories';
 
@@ -12,6 +12,7 @@ interface CategoryCardProps {
     percentage: number;
     iconType?: string;
     danger?: boolean;
+    onMeasured?: (layout: { y: number; height: number }) => void;
 }
 
 export const CategoryCard = React.memo(({
@@ -20,6 +21,7 @@ export const CategoryCard = React.memo(({
     percentage,
     iconType,
     danger = false,
+    onMeasured,
 }: CategoryCardProps) => {
     const appTheme = useStore(state => state.theme);
     const isDark = appTheme === 'dark';
@@ -38,8 +40,15 @@ export const CategoryCard = React.memo(({
         }).start();
     };
 
+    const handleLayout = useCallback((event: LayoutChangeEvent) => {
+        onMeasured?.({
+            y: event.nativeEvent.layout.y,
+            height: event.nativeEvent.layout.height,
+        });
+    }, [onMeasured]);
+
     return (
-        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+        <Animated.View style={{ transform: [{ scale: scaleAnim }] }} onLayout={handleLayout}>
             <TouchableOpacity
                 activeOpacity={0.9}
                 onPressIn={() => animateScale(1.02)}

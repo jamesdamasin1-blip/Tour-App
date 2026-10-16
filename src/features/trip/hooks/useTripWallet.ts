@@ -34,6 +34,10 @@ export const useTripWallet = (tripId: string) => {
 
         return trip.wallets.map(wallet => {
             const lots = (wallet as any).lots || [];
+            const latestFundingAt = lots.reduce((latest: number, lot: any) => {
+                const createdAt = Number(lot?.createdAt || 0);
+                return createdAt > latest ? createdAt : latest;
+            }, 0);
             // Use the latest/default lot for future conversions, but keep totals
             // historical by summing each lot at its own stored rate.
             const defaultLot = getDefaultLot(wallet as any);
@@ -56,8 +60,20 @@ export const useTripWallet = (tripId: string) => {
             }, 0);
             const spentTrip = walletSpendTotals[wallet.id]?.trip ?? Number(wallet.spentAmount || 0);
             const spentHome = walletSpendTotals[wallet.id]?.home ?? 0;
+            const cycleSpend = allExpenses.reduce((sum, expense) => {
+                if (expense.tripId !== tripId || expense.walletId !== wallet.id) return sum;
+                const expenseTimestamp = Number(expense.time || expense.date || 0);
+                if (latestFundingAt > 0 && expenseTimestamp < latestFundingAt) return sum;
+
+                return {
+                    trip: sum.trip + Number(expense.convertedAmountTrip || expense.amount || 0),
+                    home: sum.home + Number(expense.convertedAmountHome || 0),
+                };
+            }, { trip: 0, home: 0 });
             const balance = Math.max(0, totalExchangedTrip - spentTrip);
             const homeEquivalent = Math.max(0, fundingTotalBase - spentHome);
+            const cycleCapacityTrip = Math.max(balance + cycleSpend.trip, balance, totalExchangedTrip > 0 ? Math.min(totalExchangedTrip, balance + cycleSpend.trip) : 0);
+            const cycleCapacityHome = Math.max(homeEquivalent + cycleSpend.home, homeEquivalent, fundingTotalBase > 0 ? Math.min(fundingTotalBase, homeEquivalent + cycleSpend.home) : 0);
 
             return {
                 walletId: wallet.id,
@@ -70,12 +86,14 @@ export const useTripWallet = (tripId: string) => {
                 balance,
                 effectiveRate,
                 defaultRate: wallet.defaultRate,
+                cycleCapacityTrip,
+                cycleCapacityHome,
                 // Server wallet lots can be rebuilt without expense deductions, so derive
                 // remaining home value from funding totals minus synced expense totals.
                 homeEquivalent,
             };
         });
-    }, [homeCurrency, trip, walletSpendTotals]);
+    }, [allExpenses, homeCurrency, trip, tripId, walletSpendTotals]);
 
     const totalWalletBalanceHome = useMemo(
         () => walletsStats.reduce((sum, w) => sum + w.homeEquivalent, 0),
@@ -92,12 +110,24 @@ export const useTripWallet = (tripId: string) => {
         [walletsStats]
     );
 
+    const totalCycleCapacityHome = useMemo(
+        () => walletsStats.reduce((sum, w) => sum + w.cycleCapacityHome, 0),
+        [walletsStats]
+    );
+
+    const totalCycleCapacityTrip = useMemo(
+        () => walletsStats.reduce((sum, w) => sum + w.cycleCapacityTrip, 0),
+        [walletsStats]
+    );
+
     return {
         trip,
         walletsStats,
         totalWalletBalanceHome,
         totalWalletBalanceTrip,
         totalExchangedHome,
+        totalCycleCapacityHome,
+        totalCycleCapacityTrip,
         homeCurrency,
     };
 };

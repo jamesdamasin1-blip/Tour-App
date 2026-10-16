@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Text, Modal, ActivityIndicator } from 'react-native';
-import { BottomFade } from '../components/BottomFade';
 import { RippleButton } from '../components/RippleButton';
 import { useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -24,10 +23,12 @@ import {
     PRIMARY_ACTION_TEXT_SIZE,
 } from '../src/styles/primaryAction';
 import { getTripDatePickerDate } from '../src/utils/tripDates';
+import { useKeyboardInset } from '../src/hooks/useKeyboardInset';
 
 export default function CreateActivityScreen() {
     const { tripId, activityId } = useLocalSearchParams<{ tripId: string, activityId: string }>();
     const insets = useSafeAreaInsets();
+    const keyboardInset = useKeyboardInset();
     
     const {
         // State & Actions
@@ -64,9 +65,9 @@ export default function CreateActivityScreen() {
         <MeshBackground>
             <StatusBar style={isDark ? 'light' : 'dark'} />
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 className="flex-1"
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
             >
                 <Header 
                     title={activityId ? "Edit Activity" : "New Activity"} 
@@ -76,9 +77,15 @@ export default function CreateActivityScreen() {
 
                 <ScrollView
                     className="flex-1"
-                    contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12, paddingBottom: insets.bottom + 80 }}
+                    contentContainerStyle={{
+                        flexGrow: 1,
+                        paddingHorizontal: 16,
+                        paddingVertical: 12,
+                        paddingBottom: insets.bottom + 104 + keyboardInset,
+                    }}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                 >
                     <GlassView intensity={isDark ? 50 : 80} borderRadius={32} style={{ padding: 2 }}>
                         <ActivityFormDetails
@@ -164,8 +171,6 @@ export default function CreateActivityScreen() {
                     </RippleButton>
                 </ScrollView>
             </KeyboardAvoidingView>
-
-            <BottomFade visible height={190} />
 
             {/* Modals */}
 

@@ -43,6 +43,8 @@ const resetReconnectState = (tripId: string) => {
 };
 
 export const sendDeleteRequestBroadcast = (req: DeletionRequest) => {
+    // Persist locally so it can be re-broadcast if creator was offline
+    useStore.getState().addPendingSentDeletionRequest(req);
     sharedChannels[req.tripId]?.send({
         type: 'broadcast',
         event: 'delete_request',
@@ -179,6 +181,7 @@ export const useRealtimeSync = () => {
             })
             .on('broadcast', { event: 'delete_request_resolved' }, ({ payload }) => {
                 useStore.getState().removeDeletionRequest(payload.requestId);
+                useStore.getState().removePendingSentDeletionRequest(payload.requestId);
             })
             .subscribe((status, err) => {
                 if (DEBUG_REALTIME_LOGS) {
@@ -194,6 +197,17 @@ export const useRealtimeSync = () => {
                     const isReconnect = (sharedReconnectAttempts[tripId] ?? 0) > 0;
                     resetReconnectState(tripId);
                     if (isReconnect) {
+                        // Re-broadcast any pending deletion requests for this trip that the
+                        // creator may have missed while this device was disconnected.
+                        const pending = useStore.getState().pendingSentDeletionRequests
+                            .filter(r => r.tripId === tripId);
+                        for (const req of pending) {
+                            channels[tripId]?.send({
+                                type: 'broadcast',
+                                event: 'delete_request',
+                                payload: req,
+                            });
+                        }
                         // Small delay avoids race with subscription setup.
                         setTimeout(() => runSync().catch(syncErr =>
                             console.warn(`[Realtime] Reconnect sync failed for ${tripId}:`, syncErr)

@@ -16,15 +16,12 @@ type ExchangeMovementsTimelineProps = {
 };
 
 export function ExchangeMovementsTimeline({
-    activeFundsCurrency,
-    activeFundsRateToHome,
     accentColor,
     defaultBg,
     groupedTimeline,
     homeCurrency,
     isDark,
 }: ExchangeMovementsTimelineProps) {
-    const isHomeView = activeFundsCurrency === homeCurrency;
     const amountColor = isDark ? '#C9DDBD' : '#78906D';
     const formatRateText = (rate: number | null | undefined, quoteCurrency: string | null | undefined) => {
         if (!rate || rate <= 0 || !quoteCurrency || quoteCurrency === homeCurrency) return null;
@@ -63,9 +60,7 @@ export function ExchangeMovementsTimeline({
                         const equivalentLabel = showEquivalent
                             ? MathUtils.formatCurrency(equivalentAmount, equivalentCurrency)
                             : null;
-                        const rateLabel = isHomeView
-                            ? formatRateText(displayRate, displayRateQuoteCurrency)
-                            : formatRateText(activeFundsRateToHome, activeFundsCurrency);
+                        const rateLabel = formatRateText(displayRate, displayRateQuoteCurrency);
                         const previousBalanceLabel = isTopUp
                             ? MathUtils.formatCurrency(displayBalanceBefore || 0, displayCurrency)
                             : null;
@@ -96,7 +91,7 @@ export function ExchangeMovementsTimeline({
                                     </Text>
                                 </View>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                                    <View style={{ minWidth: 110, maxWidth: 136, paddingRight: 10 }}>
+                                    <View style={{ minWidth: 102, maxWidth: 128, paddingRight: 6 }}>
                                         <AnimatedValueText
                                             text={`+${MathUtils.formatCurrency(displayAmount, displayCurrency)}`}
                                             style={{ fontSize: 14, lineHeight: 18, fontWeight: '900', color: amountColor }}
@@ -106,7 +101,7 @@ export function ExchangeMovementsTimeline({
                                         style={{
                                             width: 1,
                                             alignSelf: 'stretch',
-                                            marginRight: 10,
+                                            marginRight: 8,
                                             backgroundColor: isDark ? 'rgba(178, 196, 170, 0.16)' : 'rgba(93, 109, 84, 0.18)',
                                         }}
                                     />

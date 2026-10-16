@@ -15,9 +15,11 @@ import { MeshBackground } from '@/components/MeshBackground';
 import { GlassView } from '@/components/GlassView';
 import { useTheme } from '@/src/hooks/useTheme';
 import { updateUserProfile } from '@/src/auth/googleAuth';
+import { useKeyboardInset } from '@/src/hooks/useKeyboardInset';
 
 export default function CompleteProfileScreen() {
     const { isDark } = useTheme();
+    const keyboardInset = useKeyboardInset();
     const [displayName, setDisplayName] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -56,9 +58,9 @@ export default function CompleteProfileScreen() {
         <MeshBackground>
             <KeyboardAvoidingView
                 style={styles.container}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
-                <View style={styles.content}>
+                <View style={[styles.content, { paddingBottom: keyboardInset }]}>
                     <View style={styles.iconContainer}>
                         <View style={[styles.iconCircle, { backgroundColor: colors.accent }]}>
                             <Ionicons name="checkmark-circle-outline" size={36} color="#fff" />

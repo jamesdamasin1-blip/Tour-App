@@ -17,10 +17,12 @@ import { GlassView } from '@/components/GlassView';
 import { useTheme } from '@/src/hooks/useTheme';
 import { signUpWithEmail } from '@/src/auth/googleAuth';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardInset } from '@/src/hooks/useKeyboardInset';
 
 export default function RegisterScreen() {
     const { isDark, toggleTheme } = useTheme();
     const insets = useSafeAreaInsets();
+    const keyboardInset = useKeyboardInset();
     const { email } = useLocalSearchParams<{ email: string }>();
     const [displayName, setDisplayName] = useState('');
     const [password, setPassword] = useState('');
@@ -109,11 +111,12 @@ export default function RegisterScreen() {
 
             <KeyboardAvoidingView
                 style={styles.container}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
                 <ScrollView
-                    contentContainerStyle={styles.content}
+                    contentContainerStyle={[styles.content, { paddingBottom: 80 + keyboardInset }]}
                     keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                 >
                     {/* Back Button */}
                     <TouchableOpacity

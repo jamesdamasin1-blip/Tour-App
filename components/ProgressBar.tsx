@@ -29,7 +29,7 @@ export const ProgressBar = React.memo(({
     secondaryLabel,
     fontSize = 11,
     freezeWhile = false,
-    settleMs = 180,
+    settleMs: _settleMs = 180,
     animated = Platform.OS !== 'android',
 }: ProgressBarProps) => {
     const theme = useStore(state => state.theme);
@@ -38,7 +38,7 @@ export const ProgressBar = React.memo(({
     const [width, setWidth] = useState(0);
     const clampedProgress = Math.min(Math.max(progress, 0), 100);
     const progressAnim = useRef(new Animated.Value(clampedProgress)).current;
-    const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastMeasuredWidthRef = useRef(0);
 
     const buildLabel = (value: number) => {
         if (floatingLabel) return floatingLabel;
@@ -51,52 +51,24 @@ export const ProgressBar = React.memo(({
     };
 
     const nextLabel = buildLabel(clampedProgress);
-    const [displayedProgress, setDisplayedProgress] = useState(clampedProgress);
-    const [displayedLabel, setDisplayedLabel] = useState(nextLabel);
 
     useEffect(() => {
-        if (!animated) return;
-
-        if (settleTimerRef.current) {
-            clearTimeout(settleTimerRef.current);
-            settleTimerRef.current = null;
-        }
-
-        if (freezeWhile || (displayedProgress === clampedProgress && displayedLabel === nextLabel)) {
-            return () => {
-                if (settleTimerRef.current) {
-                    clearTimeout(settleTimerRef.current);
-                    settleTimerRef.current = null;
-                }
-            };
-        }
-
-        settleTimerRef.current = setTimeout(() => {
-            setDisplayedProgress(clampedProgress);
-            setDisplayedLabel(nextLabel);
-            settleTimerRef.current = null;
-        }, settleMs);
-
-        return () => {
-            if (settleTimerRef.current) {
-                clearTimeout(settleTimerRef.current);
-                settleTimerRef.current = null;
-            }
-        };
-    }, [animated, clampedProgress, displayedLabel, displayedProgress, freezeWhile, nextLabel, settleMs]);
-
-    useEffect(() => {
-        if (!animated) return;
+        if (!animated || freezeWhile) return;
+        progressAnim.stopAnimation();
         Animated.timing(progressAnim, {
-            toValue: displayedProgress,
-            duration: 320,
+            toValue: clampedProgress,
+            duration: 220,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: false,
         }).start();
-    }, [animated, displayedProgress, progressAnim]);
+    }, [animated, clampedProgress, freezeWhile, progressAnim]);
 
     const handleLayout = (event: LayoutChangeEvent) => {
-        setWidth(event.nativeEvent.layout.width);
+        const nextWidth = event.nativeEvent.layout.width;
+        if (nextWidth > 0) {
+            lastMeasuredWidthRef.current = nextWidth;
+        }
+        setWidth(nextWidth);
     };
 
     const innerBarContent = gradientColors && gradientColors.length > 1 ? (
@@ -114,9 +86,10 @@ export const ProgressBar = React.memo(({
         />
     );
 
-    const resolvedProgress = animated ? displayedProgress : clampedProgress;
-    const resolvedLabel = animated ? displayedLabel : nextLabel;
-    const resolvedWidth = width > 0 ? (resolvedProgress / 100) * width : 0;
+    const resolvedProgress = clampedProgress;
+    const resolvedLabel = nextLabel;
+    const effectiveWidth = width > 0 ? width : lastMeasuredWidthRef.current;
+    const resolvedWidth = effectiveWidth > 0 ? (resolvedProgress / 100) * effectiveWidth : 0;
 
     if (!animated) {
         return (
@@ -145,15 +118,15 @@ export const ProgressBar = React.memo(({
 
                 <View
                     className="h-full rounded-full overflow-hidden absolute left-0 top-0 bottom-0"
-                    style={{ width: resolvedWidth }}
+                    style={{ width: resolvedWidth, minWidth: resolvedProgress > 0 ? 2 : 0 }}
                 >
                     <View className="absolute inset-0">
                         {innerBarContent}
                     </View>
 
-                    {resolvedLabel.length > 0 && width > 0 && (
+                    {resolvedLabel.length > 0 && effectiveWidth > 0 && (
                         <View
-                            style={{ width, height: '100%', alignItems: 'center', justifyContent: 'center' }}
+                            style={{ width: effectiveWidth, height: '100%', alignItems: 'center', justifyContent: 'center' }}
                             className="pointer-events-none"
                         >
                             <Text
@@ -205,9 +178,10 @@ export const ProgressBar = React.memo(({
             <Animated.View
                 className="h-full rounded-full overflow-hidden absolute left-0 top-0 bottom-0"
                 style={{
+                    minWidth: resolvedProgress > 0 ? 2 : 0,
                     width: progressAnim.interpolate({
                         inputRange: [0, 100],
-                        outputRange: [0, width || 0],
+                        outputRange: [0, effectiveWidth],
                         extrapolate: 'clamp',
                     }),
                 }}
@@ -216,9 +190,9 @@ export const ProgressBar = React.memo(({
                     {innerBarContent}
                 </View>
 
-                {resolvedLabel.length > 0 && width > 0 && (
+                {resolvedLabel.length > 0 && effectiveWidth > 0 && (
                     <View
-                        style={{ width, height: '100%', alignItems: 'center', justifyContent: 'center' }}
+                        style={{ width: effectiveWidth, height: '100%', alignItems: 'center', justifyContent: 'center' }}
                         className="pointer-events-none"
                     >
                         <Text

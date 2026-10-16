@@ -165,21 +165,43 @@ export function useExchangeHistoryData(tripId: string, fundsCurrencyIdx: number)
     }, [homeCurrency, trip, tripActivities, tripExpenses]);
 
     const convertedTimeline = useMemo(() => fullTimeline.map(entry => {
-        const displayAmount = Math.abs(convertHomeToActive(Math.abs(entry.homeAmount || 0)));
-        const equivalentAmount = activeFundsCurrency === homeCurrency
-            ? (entry.walletCurrency && entry.walletCurrency !== homeCurrency
-                ? Math.abs(entry.walletAmount || 0)
-                : null)
-            : Math.abs(entry.homeAmount || 0);
-        const equivalentCurrency = activeFundsCurrency === homeCurrency
-            ? (entry.walletCurrency && entry.walletCurrency !== homeCurrency ? entry.walletCurrency : null)
-            : homeCurrency;
-        const displayRate = activeFundsCurrency === homeCurrency
-            ? (entry.walletCurrency && entry.walletCurrency !== homeCurrency ? entry.normalizedRate : null)
-            : activeFundsRateToHome;
-        const displayRateQuoteCurrency = activeFundsCurrency === homeCurrency
-            ? entry.walletCurrency
-            : activeFundsCurrency;
+        const isNativeActiveDeposit = (
+            entry.type === 'deposit' &&
+            activeFundsCurrency !== homeCurrency &&
+            entry.walletCurrency === activeFundsCurrency
+        );
+
+        const displayAmount = isNativeActiveDeposit
+            ? Math.abs(entry.walletAmount || 0)
+            : Math.abs(convertHomeToActive(Math.abs(entry.homeAmount || 0)));
+        const equivalentAmount = isNativeActiveDeposit
+            ? Math.abs(entry.homeAmount || 0)
+            : activeFundsCurrency === homeCurrency
+                ? (entry.walletCurrency && entry.walletCurrency !== homeCurrency
+                    ? Math.abs(entry.walletAmount || 0)
+                    : null)
+                : Math.abs(entry.homeAmount || 0);
+        const equivalentCurrency = isNativeActiveDeposit
+            ? homeCurrency
+            : activeFundsCurrency === homeCurrency
+                ? (entry.walletCurrency && entry.walletCurrency !== homeCurrency ? entry.walletCurrency : null)
+                : homeCurrency;
+        const displayRate = isNativeActiveDeposit
+            ? entry.normalizedRate
+            : activeFundsCurrency === homeCurrency
+                ? (entry.walletCurrency && entry.walletCurrency !== homeCurrency ? entry.normalizedRate : null)
+                : activeFundsRateToHome;
+        const displayRateQuoteCurrency = isNativeActiveDeposit
+            ? activeFundsCurrency
+            : activeFundsCurrency === homeCurrency
+                ? entry.walletCurrency
+                : activeFundsCurrency;
+        const displayBalanceBefore = isNativeActiveDeposit
+            ? (entry.balanceBeforeWallet || 0)
+            : convertHomeToActive(entry.balanceBeforeHome || 0);
+        const displayBalanceAfter = isNativeActiveDeposit
+            ? (entry.balanceAfterWallet || 0)
+            : convertHomeToActive(entry.balanceAfterHome || 0);
 
         return {
             ...entry,
@@ -190,8 +212,8 @@ export function useExchangeHistoryData(tripId: string, fundsCurrencyIdx: number)
             displayRate,
             displayRateBaseCurrency: homeCurrency,
             displayRateQuoteCurrency,
-            displayBalanceBefore: convertHomeToActive(entry.balanceBeforeHome || 0),
-            displayBalanceAfter: convertHomeToActive(entry.balanceAfterHome || 0),
+            displayBalanceBefore,
+            displayBalanceAfter,
         };
     }), [activeFundsCurrency, activeFundsRateToHome, convertHomeToActive, fullTimeline, homeCurrency]);
 

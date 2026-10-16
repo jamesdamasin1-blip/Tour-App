@@ -18,10 +18,12 @@ import { useTheme } from '@/src/hooks/useTheme';
 import { signInWithGoogle, onAuthStateChange } from '@/src/auth/googleAuth';
 import { bootstrapAuthState } from '@/src/auth/authRuntime';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardInset } from '@/src/hooks/useKeyboardInset';
 
 export default function AuthEntryScreen() {
     const { isDark, toggleTheme } = useTheme();
     const insets = useSafeAreaInsets();
+    const keyboardInset = useKeyboardInset();
     const [email, setEmail] = useState('');
     const [loading, setLoading] = useState<'google' | 'email' | null>(null);
     const [transitioning, setTransitioning] = useState(false);
@@ -136,9 +138,9 @@ export default function AuthEntryScreen() {
 
             <KeyboardAvoidingView
                 style={styles.container}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
-                <View style={styles.content}>
+                <View style={[styles.content, { paddingBottom: keyboardInset }]}>
                     {/* Logo / Brand */}
                     <View style={styles.brandSection}>
                         <View style={[styles.logoCircle, { backgroundColor: colors.accent }]}>

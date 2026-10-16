@@ -58,6 +58,7 @@ export function ActivitySummaryModal({
         : activity.allocatedBudget * walletRate;
 
     const isOverBudget = totalSpentHome > allocatedBudgetHome;
+    const usesBudgetVariance = !activity.isSpontaneous;
     const variance = Math.abs(allocatedBudgetHome - totalSpentHome);
     const hasExpenses = activity.expenses && activity.expenses.length > 0;
     const isSpontaneousCompleted = !!activity.isSpontaneous && activity.isCompleted;
@@ -76,6 +77,10 @@ export function ActivitySummaryModal({
         onToggleComplete();
         onClose();
     };
+
+    const summaryAccentColor = usesBudgetVariance
+        ? (isOverBudget ? '#FF3B30' : (isDark ? '#F2F0E8' : '#5D6D54'))
+        : (isDark ? '#F59E0B' : '#B45309');
 
     return (
         <AnimatedModal visible={isVisible} onClose={onClose}>
@@ -113,14 +118,14 @@ export function ActivitySummaryModal({
                                     <View className="py-2">
                                         <Text 
                                             className="text-[14px] font-black uppercase tracking-widest"
-                                            style={{ color: isOverBudget ? '#FF3B30' : (isDark ? '#F2F0E8' : '#5D6D54') }}
+                                            style={{ color: summaryAccentColor }}
                                         >
-                                            {isOverBudget ? 'YOU EXCEEDED BY ' : "YOU'VE SAVED "}
+                                            {activity.isSpontaneous ? 'TOTAL COST ' : (isOverBudget ? 'YOU EXCEEDED BY ' : "YOU'VE SAVED ")}
                                             <AnimatedValueText
-                                                text={Calculations.formatCurrency(variance, homeCurrency)}
-                                                style={{ color: isOverBudget ? '#FF3B30' : (isDark ? '#F2F0E8' : '#5D6D54') }}
+                                                text={Calculations.formatCurrency(activity.isSpontaneous ? totalSpentHome : variance, homeCurrency)}
+                                                style={{ color: summaryAccentColor }}
                                             />
-                                            {isOverBudget ? ' FOR THIS TRIP.' : ' FOR THIS TRIP.'}
+                                            {activity.isSpontaneous ? ' FOR THIS ACTIVITY.' : ' FOR THIS TRIP.'}
                                         </Text>
                                     </View>
 

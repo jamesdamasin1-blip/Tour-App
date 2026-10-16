@@ -9,9 +9,10 @@ import type { BreakdownMode } from '@/src/hooks/useFilteredBreakdown';
 import { useStore } from '@/src/store/useStore';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { FlatList, NativeScrollEvent, NativeSyntheticEvent, View } from 'react-native';
 
 type TabType = 'DAILY' | 'TOTAL';
+const ANALYSIS_FADE_HEIGHT = 170;
 
 export default function BudgetAnalysisScreen() {
     const router = useRouter();
@@ -25,7 +26,10 @@ export default function BudgetAnalysisScreen() {
     const [selectedDay, setSelectedDay] = useState<string | null>(null);
     const [breakdownMode, setBreakdownMode] = useState<BreakdownMode>('all');
     const [totalMode, setTotalMode] = useState<'overall' | 'planned' | 'spontaneous'>('overall');
+    const [showBottomFade, setShowBottomFade] = useState(false);
     const isDark = theme === 'dark';
+    const viewportHeightRef = React.useRef(0);
+    const contentHeightRef = React.useRef(0);
 
     useFocusEffect(
         useCallback(() => {
@@ -71,6 +75,26 @@ export default function BudgetAnalysisScreen() {
             router.navigate('/');
         }
     }, [router, selectedDay, selectedTripId]);
+
+    const updateBottomFade = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+        const isScrollable = contentSize.height > layoutMeasurement.height + 8;
+        const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 40;
+        setShowBottomFade(isScrollable && !isCloseToBottom);
+    }, []);
+
+    const updateBottomFadeFromSizes = useCallback(() => {
+        const isScrollable = contentHeightRef.current > viewportHeightRef.current + 8;
+        setShowBottomFade(isScrollable);
+    }, []);
+
+    const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        updateBottomFade(event);
+    }, [updateBottomFade]);
+
+    React.useEffect(() => {
+        setShowBottomFade(false);
+    }, [selectedTripId, selectedDay, activeTab, totalMode, breakdownMode]);
 
     const sectionHeader = useMemo(() => (
         <AnalysisSectionHeader
@@ -145,11 +169,24 @@ export default function BudgetAnalysisScreen() {
                     showsVerticalScrollIndicator={false}
                     className="flex-1"
                     removeClippedSubviews
+                    onLayout={(event) => {
+                        viewportHeightRef.current = event.nativeEvent.layout.height;
+                        updateBottomFadeFromSizes();
+                    }}
+                    onContentSizeChange={(_, height) => {
+                        contentHeightRef.current = height;
+                        updateBottomFadeFromSizes();
+                    }}
+                    onScroll={handleScroll}
+                    scrollEventThrottle={16}
                 />
             )}
 
-            <BottomFade visible={!!selectedTripId} height={170} />
-
+            <BottomFade
+                visible={!!selectedTripId && showBottomFade}
+                height={ANALYSIS_FADE_HEIGHT}
+                bottomOffset={0}
+            />
         </MeshBackground>
     );
 }

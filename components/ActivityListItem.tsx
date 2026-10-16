@@ -3,8 +3,8 @@ import { Calculations as MathUtils } from '@/src/utils/mathUtils';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useMemo, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { LayoutChangeEvent, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
     interpolate,
@@ -28,6 +28,7 @@ interface ActivityListItemProps {
     onRequestDelete?: (activity: Activity) => void;
     onEdit?: (activity: Activity) => void;
     onToggleComplete?: () => void;
+    onMeasured?: (activityId: string, layout: { y: number; height: number }) => void;
 }
 
 const MAX_SWIPE_RIGHT = 110;
@@ -44,6 +45,7 @@ export const ActivityListItem = React.memo(({
     onRequestDelete,
     onEdit,
     onToggleComplete,
+    onMeasured,
 }: ActivityListItemProps) => {
     const theme = useStore(state => state.theme);
     const trips = useStore(state => state.trips);
@@ -85,8 +87,23 @@ export const ActivityListItem = React.memo(({
     const displaySpendPercentage = Math.max(spendPercentage || 0, 0);
     const progressSpendPercentage = Math.min(displaySpendPercentage, 100);
 
+    const isSpontaneous = !!activity.isSpontaneous;
     const varianceHome = Math.abs(allocatedBudgetHome - totalSpentHome);
     const isOverBudget = totalSpentHome > allocatedBudgetHome;
+    const usesBudgetVariance = !isSpontaneous;
+    const statusAccentColor = usesBudgetVariance
+        ? (isOverBudget ? '#ef4444' : (isDark ? '#9EB294' : '#5D6D54'))
+        : (isDark ? '#F2F0E8' : '#374151');
+    const progressAccentColor = usesBudgetVariance
+        ? (isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54'))
+        : '#F59E0B';
+    const progressContainerColor = usesBudgetVariance
+        ? (
+            isOverBudget
+                ? (isDark ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2')
+                : (isDark ? 'rgba(158, 178, 148, 0.1)' : '#f1f5f1')
+        )
+        : (isDark ? 'rgba(245, 158, 11, 0.18)' : 'rgba(245, 158, 11, 0.14)');
 
     const dateString = new Date(activity.date).toLocaleDateString([], { month: 'short', day: 'numeric' });
     const timeString = activity.time
@@ -96,7 +113,6 @@ export const ActivityListItem = React.memo(({
     const translateX = useSharedValue(0);
     const hapticFiredRight = useSharedValue(false);
     const hapticFiredLeft = useSharedValue(false);
-    const isSpontaneous = !!activity.isSpontaneous;
     const canSwipeDelete = !isSpontaneous && !activity.isCompleted;
     const canSwipeEdit = !activity.isCompleted || isSpontaneous;
     const canTapIntoCard = !isSpontaneous;
@@ -182,8 +198,15 @@ export const ActivityListItem = React.memo(({
         return { transform: [{ scale }], opacity };
     });
 
+    const handleLayout = useCallback((event: LayoutChangeEvent) => {
+        onMeasured?.(activity.id, {
+            y: event.nativeEvent.layout.y,
+            height: event.nativeEvent.layout.height,
+        });
+    }, [activity.id, onMeasured]);
+
     return (
-        <View style={styles.rootWrapper}>
+        <View style={styles.rootWrapper} onLayout={handleLayout}>
             <GestureDetector gesture={pan}>
                 <Animated.View style={[styles.cardWrapper, cardAnimStyle, shadowAnimStyle]}>
                     <TouchableOpacity
@@ -280,7 +303,7 @@ export const ActivityListItem = React.memo(({
                                     </View>
                                     {activity.expenses && activity.expenses.length > 0 ? (
                                         <View style={styles.headerRight}>
-                                            <Text style={[styles.statusLabel, { color: isOverBudget ? '#ef4444' : (isDark ? '#9EB294' : '#5D6D54') }]}>
+                                            <Text style={[styles.statusLabel, { color: statusAccentColor }]}>
                                                 {activity.isSpontaneous ? 'COST' : (isOverBudget ? 'EXCEEDED BY' : (varianceHome === 0 ? 'ON POINT' : 'SAVED'))}
                                             </Text>
                                             <AnimatedValueText
@@ -290,7 +313,7 @@ export const ActivityListItem = React.memo(({
                                                         : MathUtils.formatCurrency(varianceHome, homeCurrency)
                                                 }
                                                 animated={false}
-                                                style={[styles.statusAmount, { color: isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54') }]}
+                                                style={[styles.statusAmount, { color: progressAccentColor }]}
                                             />
                                         </View>
                                     ) : allocatedBudgetHome > 0 && !activity.isSpontaneous ? (
@@ -310,16 +333,14 @@ export const ActivityListItem = React.memo(({
                                 {/* Cost bar — shown for both planned and spontaneous */}
                                 {activity.expenses && activity.expenses.length > 0 && (
                                     <View style={{
-                                        backgroundColor: isOverBudget
-                                            ? (isDark ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2')
-                                            : (isDark ? 'rgba(158, 178, 148, 0.1)' : '#f1f5f1'),
+                                        backgroundColor: progressContainerColor,
                                         borderRadius: 12,
                                         marginTop: 4
                                     }}>
                                         <ProgressBar
                                             progress={activity.isSpontaneous ? 100 : progressSpendPercentage}
-                                            animated={false}
-                                            color={isOverBudget ? '#ef4444' : (isDark ? '#B2C4AA' : '#5D6D54')}
+                                            animated
+                                            color={progressAccentColor}
                                             trackColor="transparent"
                                             height={24}
                                             fontSize={11}

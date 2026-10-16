@@ -70,7 +70,6 @@ export default function TabLayout() {
                     tabBarBackground: () => (
                         <View style={{ flex: 1, overflow: 'visible' }}>
                             <TabBg overlapTop={34} />
-                            <FooterTopFade isDark={isDark} />
                         </View>
                     ),
                     tabBarStyle: {
@@ -107,6 +106,24 @@ export default function TabLayout() {
                     }}
                 />
             </Tabs>
+
+            <View
+                pointerEvents="none"
+                style={{
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    bottom: 64 + insets.bottom - 6,
+                    zIndex: 60,
+                }}
+            >
+                <FooterTopFade
+                    isDark={isDark}
+                    top={-62}
+                    height={132}
+                    opacity={1}
+                />
+            </View>
 
             {/* FAB choice modal */}
             <AnimatedModal visible={isFabModalOpen} onClose={() => setIsFabModalOpen(false)}>

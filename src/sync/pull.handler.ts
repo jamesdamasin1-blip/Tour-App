@@ -250,8 +250,7 @@ function applyExpenses(remote: any[], scopedTripIds?: string[]): void {
         for (const local of localInScope) {
             if (!remoteMap.has(local.id)) {
                 if (skipEviction || pendingIds.has(local.id)) {
-                    if (pendingIds.has(local.id)) merged.push(local);
-                    else merged.push(local);
+                    merged.push(local);
                 } else {
                     console.warn(`[SYNC] Evicting orphaned expense ${local.id}`);
                     deleteRecord('expenses', local.id);

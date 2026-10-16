@@ -258,7 +258,7 @@ export const SpontaneousExpenseModal = ({
     };
 
     return (
-        <AnimatedModal visible={visible} onClose={onClose}>
+        <AnimatedModal visible={visible} onClose={onClose} keyboardAware>
             <GlassView
                 intensity={isDark ? 50 : 95}
                 borderRadius={32}
@@ -274,7 +274,12 @@ export const SpontaneousExpenseModal = ({
                     </TouchableOpacity>
                 </View>
 
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+                <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.scrollContent}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
+                >
                     <View style={styles.inputSection}>
                         <Text style={[styles.label, isDark && { color: '#B2C4AA', opacity: 0.6 }]}>
                             WHAT DID YOU BUY?

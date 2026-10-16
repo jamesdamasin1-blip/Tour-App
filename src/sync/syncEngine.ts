@@ -223,8 +223,6 @@ export const onRemoteUpdate = (_cb: unknown) => {
     // Legacy no-op: snapshots are now applied directly in the sync engine.
 };
 
-const _onRemoteUpdate: any = null;
-
 const getWalletVersion = (wallet: any): number => {
     const version = Number(wallet?.version ?? 0);
     return Number.isFinite(version) ? version : 0;
@@ -716,22 +714,6 @@ export const legacyPullRemoteUpdates = async (auth: AuthState): Promise<number> 
     }
 
     // ── Update Zustand store ──────────────────────────────────
-    if (_onRemoteUpdate) {
-        _onRemoteUpdate({
-            trips: pulledTrips.length > 0 ? pulledTrips : undefined,
-            activities: pulledActivities.length > 0 ? pulledActivities : undefined,
-            expenses: pulledExpenses.length > 0 ? pulledExpenses : undefined,
-            wallets: pulledWallets.length > 0 ? pulledWallets : undefined,
-            sharedTripIds: allTripIds,
-            currentUserId: auth.userId!,
-            deletedTripIds: deletedTripIds.length > 0 ? deletedTripIds : undefined,
-            deletedActivityIds: deletedActivityIds.length > 0 ? deletedActivityIds : undefined,
-            deletedExpenseIds: deletedExpenseIds.length > 0 ? deletedExpenseIds : undefined,
-        });
-    } else {
-        console.warn('[SyncEngine] No onRemoteUpdate callback registered!');
-    }
-
     setSyncMeta('lastPullTimestamp', String(Date.now()));
     return pulled;
 };

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Activity } from '@/src/types/models';
@@ -13,12 +13,14 @@ interface Props {
     onDelete?: (activity: Activity) => void;
     onRequestDelete?: (activity: Activity) => void;
     onToggleComplete?: (activityId: string) => void;
+    onMeasureItem?: (activityId: string, layout: { y: number; height: number }) => void;
+    onVisibleActivitiesChange?: (activityIds: string[]) => void;
 }
 
 type ViewMode = 'planned' | 'spontaneous';
 
 export const ActivitiesSection = React.memo(({
-    activities, tripTitle, onPress, onEdit, onDelete, onRequestDelete, onToggleComplete,
+    activities, tripTitle, onPress, onEdit, onDelete, onRequestDelete, onToggleComplete, onMeasureItem, onVisibleActivitiesChange,
 }: Props) => {
     const theme = useStore(state => state.theme);
     const isDark = theme === 'dark';
@@ -30,6 +32,10 @@ export const ActivitiesSection = React.memo(({
             .sort((a, b) => (a.isCompleted ? 1 : 0) - (b.isCompleted ? 1 : 0)),
         [activities, mode]
     );
+
+    useEffect(() => {
+        onVisibleActivitiesChange?.(filtered.map(activity => activity.id));
+    }, [filtered, onVisibleActivitiesChange]);
 
     if (activities.length === 0) {
         return (
@@ -98,6 +104,7 @@ export const ActivitiesSection = React.memo(({
                     <ActivityListItem
                         key={activity.id}
                         activity={activity}
+                        onMeasured={onMeasureItem}
                         onPress={onPress}
                         onEdit={onEdit}
                         onDelete={onDelete}

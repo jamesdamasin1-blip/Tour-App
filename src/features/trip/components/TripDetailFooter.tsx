@@ -1,4 +1,3 @@
-import { FooterTopFade } from '@/components/FooterTopFade';
 import { TabBg } from '@/components/TabBg';
 import { Feather } from '@expo/vector-icons';
 import React from 'react';
@@ -25,7 +24,6 @@ export function TripDetailFooter({
         <View style={[styles.footerContainer, { height: 64 + bottomInset, paddingBottom: bottomInset, zIndex: 10 }]}>
             <View style={{ flex: 1, overflow: 'visible' }}>
                 <TabBg overlapTop={34} />
-                <FooterTopFade isDark={isDark} />
             </View>
             <View style={styles.footerIcons}>
                 <TouchableOpacity onPress={onOpenHome} className="flex-1 items-center justify-center h-full">

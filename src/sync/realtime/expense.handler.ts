@@ -48,10 +48,19 @@ export function handleExpenseChange(payload: any, state: StateSnapshot): Handler
         };
     }
 
+    // If the expense references an activity we don't have yet (e.g. spontaneous expense
+    // whose activity realtime event hasn't arrived), schedule a debounced refetch so the
+    // activity card appears promptly. The expense patch is still applied so balance is
+    // accurate; the refetch is cancelled if the activity event arrives within 250ms.
+    const activityMissing =
+        !!incoming.activityId &&
+        !state.activities.some(a => a.id === incoming.activityId);
+
     syncTrace('ExpenseRT', 'patch_expense_row', {
         payload: summarizeRealtimePayload(payload),
         expenseId: incoming.id,
         tripId: incoming.tripId,
+        activityMissing,
     });
     const nextExpenses = [
         ...state.expenses.filter(e => e.id !== incoming.id),
@@ -69,5 +78,6 @@ export function handleExpenseChange(payload: any, state: StateSnapshot): Handler
                     }
             ),
         },
+        ...(activityMissing ? { triggerRefetchTripId: incoming.tripId } : {}),
     };
 }

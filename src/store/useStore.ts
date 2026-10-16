@@ -8,7 +8,7 @@ import { ExpenseSlice, createExpenseSlice } from './slices/expenseSlice';
 import { ExchangeEventSlice, createExchangeEventSlice } from './slices/exchangeEventSlice';
 import { SettingsSlice, createSettingsSlice } from './slices/settingsSlice';
 import { InviteSlice, createInviteSlice } from './slices/inviteSlice';
-import { registerStoreBridge } from './storeBridge';
+import { clearPersistedStoreState, registerStoreBridge } from './storeBridge';
 
 // ─── Composed State ──────────────────────────────────────────────
 
@@ -48,26 +48,29 @@ registerStoreBridge<AppState>({
 });
 
 export const clearPersistedAppState = async (): Promise<void> => {
-    const preservedTheme = useStore.getState().theme;
-
-    await useStore.persist.clearStorage();
-
-    useStore.setState({
-        trips: [],
-        activities: [],
-        expenses: [],
-        exchangeEvents: [],
-        invites: [],
-        inviteLoading: false,
-        currencyRates: {
-            timestamp: 0,
-            rates: { MYR: null, SGD: null, PHP: 1 },
+    await clearPersistedStoreState<AppState>({
+        preserveTheme: state => state.theme,
+        clearStorage: async () => {
+            await useStore.persist.clearStorage();
         },
-        theme: preservedTheme,
-        walletError: null,
-        currentUserId: null,
-        deletionRequests: [],
-        isTripsSidebarOpen: false,
-        tripMutationCounts: {},
+        buildResetState: (theme) => ({
+            trips: [],
+            activities: [],
+            expenses: [],
+            exchangeEvents: [],
+            invites: [],
+            inviteLoading: false,
+            currencyRates: {
+                timestamp: 0,
+                rates: { MYR: null, SGD: null, PHP: 1 },
+            },
+            theme,
+            walletError: null,
+            currentUserId: null,
+            deletionRequests: [],
+            pendingSentDeletionRequests: [],
+            isTripsSidebarOpen: false,
+            tripMutationCounts: {},
+        }),
     });
 };

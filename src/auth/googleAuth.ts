@@ -8,7 +8,8 @@ import * as WebBrowser from 'expo-web-browser';
 import { getSyncMeta, setSyncMeta, clearAllUserData } from '../storage/localDB';
 import { generateId } from '../utils/mathUtils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { clearPersistedAppState } from '../store/useStore';
+import { clearPersistedStoreState } from '../store/storeBridge';
+import type { AppState } from '../store/useStore';
 
 WebBrowser.maybeCompleteAuthSession();
 const AUTH_DEBUG_LOGS = false;
@@ -221,7 +222,30 @@ export const signOut = async (clearLocalData = false): Promise<AuthState> => {
     // Optionally clear all user data (full logout)
     if (clearLocalData) {
         clearAllUserData();
-        await clearPersistedAppState();
+        await clearPersistedStoreState<AppState>({
+            preserveTheme: state => state.theme,
+            clearStorage: async () => {
+                await AsyncStorage.removeItem('aliqual-storage');
+            },
+            buildResetState: (theme) => ({
+                trips: [],
+                activities: [],
+                expenses: [],
+                exchangeEvents: [],
+                invites: [],
+                inviteLoading: false,
+                currencyRates: {
+                    timestamp: 0,
+                    rates: { MYR: null, SGD: null, PHP: 1 },
+                },
+                theme,
+                walletError: null,
+                currentUserId: null,
+                deletionRequests: [],
+                isTripsSidebarOpen: false,
+                tripMutationCounts: {},
+            }),
+        });
     }
 
     return getAuthState();

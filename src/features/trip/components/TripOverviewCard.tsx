@@ -261,16 +261,57 @@ export function TripOverviewCard({
 
 function getWalletTone(balanceRatio: number, isDark: boolean): string {
     const safeRatio = Math.max(0, Math.min(balanceRatio, 1));
-    const emptyColor = isDark ? '#F87171' : '#DC2626';
-    const healthyColor = isDark ? '#B2C4AA' : '#5D6D54';
-    return mixHex(emptyColor, healthyColor, safeRatio);
+    return mixColorStops(
+        safeRatio,
+        isDark
+            ? [
+                [0, '#F87171'],
+                [0.45, '#F59E0B'],
+                [1, '#B2C4AA'],
+            ]
+            : [
+                [0, '#DC2626'],
+                [0.45, '#F59E0B'],
+                [1, '#5D6D54'],
+            ]
+    );
 }
 
 function getWalletLabelTone(balanceRatio: number, isDark: boolean): string {
     const safeRatio = Math.max(0, Math.min(balanceRatio, 1));
-    const emptyColor = isDark ? '#FCA5A5' : '#EF4444';
-    const healthyColor = isDark ? '#9EB294' : '#6B7280';
-    return mixHex(emptyColor, healthyColor, safeRatio);
+    return mixColorStops(
+        safeRatio,
+        isDark
+            ? [
+                [0, '#FCA5A5'],
+                [0.45, '#FCD34D'],
+                [1, '#9EB294'],
+            ]
+            : [
+                [0, '#EF4444'],
+                [0.45, '#F59E0B'],
+                [1, '#6B7280'],
+            ]
+    );
+}
+
+function mixColorStops(value: number, stops: [number, string][]): string {
+    const safeValue = Math.max(0, Math.min(value, 1));
+    const sortedStops = [...stops].sort((a, b) => a[0] - b[0]);
+
+    for (let index = 0; index < sortedStops.length - 1; index += 1) {
+        const [startPoint, startColor] = sortedStops[index];
+        const [endPoint, endColor] = sortedStops[index + 1];
+
+        if (safeValue >= startPoint && safeValue <= endPoint) {
+            const segmentRatio = endPoint === startPoint
+                ? 0
+                : (safeValue - startPoint) / (endPoint - startPoint);
+            return mixHex(startColor, endColor, segmentRatio);
+        }
+    }
+
+    return sortedStops[sortedStops.length - 1][1];
 }
 
 function mixHex(start: string, end: string, ratio: number): string {

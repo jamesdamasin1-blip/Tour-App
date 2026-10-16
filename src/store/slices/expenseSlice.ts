@@ -8,9 +8,10 @@ import {
     beginTripCloudMutation,
     endTripCloudMutation,
     fetchTripCloudBundle,
-    refreshTripCloudStateInBackground,
+    refreshTripCloudState,
     setWalletErrorState,
 } from '../cloudSyncHelpers';
+import { isAlreadyDeletedCloudError } from '../cloudMutationErrors';
 import { syncTrace, summarizeActivity, summarizeExpenses, summarizeTrip, summarizeWallet } from '../../sync/debug';
 import { stampFieldUpdates, supabase } from '../storeHelpers';
 
@@ -77,8 +78,12 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
 
     addExpense: async (tripId, walletId, activityId, expenseData) => {
         beginTripCloudMutation(tripId);
+        setWalletErrorState(null);
+        const expenseId = expenseData.id || generateId();
+        let optimisticApplied = false;
+        let rpcSucceeded = false;
+
         try {
-            setWalletErrorState(null);
             syncTrace('ExpenseMutation', 'submit_add', { tripId, walletId, activityId, expenseData });
             const localTrip = _get().trips.find(trip => trip.id === tripId);
             const localWallet = localTrip?.wallets.find(wallet => wallet.id === walletId);
@@ -95,7 +100,6 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
             const lastModified = Date.now();
             const { currency, convertedAmountTrip, convertedAmountHome } = withConvertedAmounts(wallet, expenseData);
             assertSufficientWalletBalance(wallet, convertedAmountTrip);
-            const expenseId = expenseData.id || generateId();
 
             const newExpense: Expense = {
                 ...(expenseData as Expense),
@@ -118,22 +122,44 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                     convertedAmountHome,
                 }, lastModified),
             };
+
+            // Optimistic insert — balance drops immediately via walletSpendTotals derivation
+            _set(s => ({
+                expenses: [...s.expenses, newExpense],
+                activities: activityId
+                    ? s.activities.map(a =>
+                        a.id === activityId
+                            ? { ...a, expenses: [...(a.expenses || []), newExpense] }
+                            : a
+                      )
+                    : s.activities,
+            }));
+            optimisticApplied = true;
+
             const { error: expenseErr } = await supabase.rpc('add_expense_cloud', {
                 p_expense: newExpense,
             });
             if (expenseErr) throw expenseErr;
             syncTrace('ExpenseMutation', 'rpc_add_success', summarizeExpenses([newExpense]));
-
-            refreshTripCloudStateInBackground(tripId, 'expense_add');
-            syncTrace('ExpenseMutation', 'refresh_after_add_deferred', { tripId, walletId, activityId });
+            rpcSucceeded = true;
+            await refreshTripCloudState(tripId);
+            syncTrace('ExpenseMutation', 'refresh_after_add_done', { tripId, walletId, activityId });
         } catch (error: any) {
+            // Rollback optimistic insert only if RPC failed (server never saw it)
+            if (optimisticApplied && !rpcSucceeded) {
+                _set(s => ({
+                    expenses: s.expenses.filter(e => e.id !== expenseId),
+                    activities: activityId
+                        ? s.activities.map(a =>
+                            a.id === activityId
+                                ? { ...a, expenses: (a.expenses || []).filter(e => e.id !== expenseId) }
+                                : a
+                          )
+                        : s.activities,
+                }));
+            }
             setWalletErrorState(error?.message || 'Check your wallet balances!');
-            syncTrace('ExpenseMutation', 'add_failed', {
-                tripId,
-                walletId,
-                activityId,
-                message: error?.message,
-            });
+            syncTrace('ExpenseMutation', 'add_failed', { tripId, walletId, activityId, message: error?.message });
             console.error('[Expense] Add failed:', error);
             throw error;
         } finally {
@@ -147,8 +173,10 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
         if (!tripId) return;
 
         beginTripCloudMutation(tripId);
+        setWalletErrorState(null);
+        let optimisticApplied = false;
+
         try {
-            setWalletErrorState(null);
             syncTrace('ExpenseMutation', 'submit_update', { tripId, expenseId: id, patch: expenseData });
 
             const localTrip = _get().trips.find(trip => trip.id === tripId);
@@ -204,22 +232,42 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 { ...expenseData, ...converted },
                 lastModified
             );
+
+            // Optimistic update (only if we have local state to update)
+            if (localExpense && localTrip) {
+                _set(s => ({
+                    expenses: s.expenses.map(e => e.id === id ? updatedExpense : e),
+                    activities: s.activities.map(a =>
+                        a.id === expense.activityId
+                            ? { ...a, expenses: (a.expenses || []).map(e => e.id === id ? updatedExpense : e) }
+                            : a
+                    ),
+                }));
+                optimisticApplied = true;
+            }
+
             const { error: expenseErr } = await supabase.rpc('update_expense_cloud', {
                 p_expense_id: id,
                 p_expense: updatedExpense,
             });
             if (expenseErr) throw expenseErr;
             syncTrace('ExpenseMutation', 'rpc_update_success', summarizeExpenses([updatedExpense]));
-
-            refreshTripCloudStateInBackground(tripId, 'expense_update');
-            syncTrace('ExpenseMutation', 'refresh_after_update_deferred', { tripId, expenseId: id });
+            optimisticApplied = false;
+            await refreshTripCloudState(tripId);
+            syncTrace('ExpenseMutation', 'refresh_after_update_done', { tripId, expenseId: id });
         } catch (error: any) {
+            if (optimisticApplied && localExpense) {
+                _set(s => ({
+                    expenses: s.expenses.map(e => e.id === id ? localExpense : e),
+                    activities: s.activities.map(a =>
+                        a.id === localExpense.activityId
+                            ? { ...a, expenses: (a.expenses || []).map(e => e.id === id ? localExpense : e) }
+                            : a
+                    ),
+                }));
+            }
             setWalletErrorState(error?.message || 'Check your wallet balances!');
-            syncTrace('ExpenseMutation', 'update_failed', {
-                tripId,
-                expenseId: id,
-                message: error?.message,
-            });
+            syncTrace('ExpenseMutation', 'update_failed', { tripId, expenseId: id, message: error?.message });
             console.error('[Expense] Update failed:', error);
             throw error;
         } finally {
@@ -228,29 +276,57 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
     },
 
     deleteExpense: async (id) => {
-        const tripId = _get().expenses.find(expense => expense.id === id)?.tripId;
+        const prevExpense = _get().expenses.find(expense => expense.id === id);
+        const tripId = prevExpense?.tripId;
         if (!tripId) return;
+        const deviceId = getDeviceId();
 
         beginTripCloudMutation(tripId);
+        setWalletErrorState(null);
+
+        // Optimistic remove — balance rises immediately
+        _set(s => ({
+            expenses: s.expenses.filter(e => e.id !== id),
+            activities: s.activities.map(a =>
+                a.id === prevExpense?.activityId
+                    ? { ...a, expenses: (a.expenses || []).filter(e => e.id !== id) }
+                    : a
+            ),
+        }));
+        let rpcSucceeded = false;
+
         try {
-            setWalletErrorState(null);
             syncTrace('ExpenseMutation', 'submit_delete', { tripId, expenseId: id });
 
             const { error: expenseErr } = await supabase.rpc('delete_expense_cloud', {
                 p_expense_id: id,
+                p_last_device_id: deviceId,
             });
-            if (expenseErr) throw expenseErr;
+            if (expenseErr) {
+                if (isAlreadyDeletedCloudError(expenseErr, 'expense')) {
+                    rpcSucceeded = true;
+                    await refreshTripCloudState(tripId);
+                    return;
+                }
+                throw expenseErr;
+            }
             syncTrace('ExpenseMutation', 'rpc_delete_success', { tripId, expenseId: id });
-
-            refreshTripCloudStateInBackground(tripId, 'expense_delete');
-            syncTrace('ExpenseMutation', 'refresh_after_delete_deferred', { tripId, expenseId: id });
+            rpcSucceeded = true;
+            await refreshTripCloudState(tripId);
+            syncTrace('ExpenseMutation', 'refresh_after_delete_done', { tripId, expenseId: id });
         } catch (error: any) {
+            if (!rpcSucceeded && prevExpense) {
+                _set(s => ({
+                    expenses: [...s.expenses, prevExpense],
+                    activities: s.activities.map(a =>
+                        a.id === prevExpense.activityId
+                            ? { ...a, expenses: [...(a.expenses || []), prevExpense] }
+                            : a
+                    ),
+                }));
+            }
             setWalletErrorState(error?.message || 'Check your wallet balances!');
-            syncTrace('ExpenseMutation', 'delete_failed', {
-                tripId,
-                expenseId: id,
-                message: error?.message,
-            });
+            syncTrace('ExpenseMutation', 'delete_failed', { tripId, expenseId: id, message: error?.message });
             console.error('[Expense] Delete failed:', error);
             throw error;
         } finally {
@@ -260,8 +336,15 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
 
     logSpontaneousExpense: async (tripId, walletId, data) => {
         beginTripCloudMutation(tripId);
+        setWalletErrorState(null);
+
+        // Generate IDs and flags outside try so catch/rollback can reference them
+        const activityId = generateId();
+        const expenseId = generateId();
+        let optimisticApplied = false;
+        let rpcSucceeded = false;
+
         try {
-            setWalletErrorState(null);
             syncTrace('ExpenseMutation', 'submit_spontaneous', { tripId, walletId, data });
             const deviceId = getDeviceId();
             const localTrip = _get().trips.find(trip => trip.id === tripId);
@@ -277,8 +360,6 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
             });
 
             const lastModified = Date.now();
-            const activityId = generateId();
-            const expenseId = generateId();
             const defaultLot = getDefaultLot(wallet as any);
             const lockedRate = defaultLot?.lockedRate ?? wallet.baselineExchangeRate ?? 1;
             const convertedAmountTrip = data.amount;
@@ -353,6 +434,16 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                     countries: [],
                 }, lastModified),
             };
+
+            // Optimistic insert — activity card + balance drop appear immediately.
+            // This also eliminates the flash where member sees balance drop before
+            // the activity realtime event arrives (creator's own view).
+            _set(s => ({
+                activities: [...s.activities, newActivity],
+                expenses: [...s.expenses, newExpense],
+            }));
+            optimisticApplied = true;
+
             const { error } = await supabase.rpc('log_spontaneous_expense_cloud', {
                 p_activity: newActivity,
                 p_expense: newExpense,
@@ -362,16 +453,19 @@ export const createExpenseSlice: StateCreator<AppState, [], [], ExpenseSlice> = 
                 activity: summarizeActivity(newActivity),
                 expense: summarizeExpenses([newExpense]),
             });
-
-            refreshTripCloudStateInBackground(tripId, 'expense_spontaneous');
-            syncTrace('ExpenseMutation', 'refresh_after_spontaneous_deferred', { tripId, walletId });
+            rpcSucceeded = true;
+            await refreshTripCloudState(tripId);
+            syncTrace('ExpenseMutation', 'refresh_after_spontaneous_done', { tripId, walletId });
         } catch (error: any) {
+            // Rollback optimistic inserts only if RPC failed
+            if (optimisticApplied && !rpcSucceeded) {
+                _set(s => ({
+                    activities: s.activities.filter(a => a.id !== activityId),
+                    expenses: s.expenses.filter(e => e.id !== expenseId),
+                }));
+            }
             setWalletErrorState(error?.message || 'Check your wallet balances!');
-            syncTrace('ExpenseMutation', 'spontaneous_failed', {
-                tripId,
-                walletId,
-                message: error?.message,
-            });
+            syncTrace('ExpenseMutation', 'spontaneous_failed', { tripId, walletId, message: error?.message });
             console.error('[Expense] Spontaneous expense failed:', error);
             throw error;
         } finally {

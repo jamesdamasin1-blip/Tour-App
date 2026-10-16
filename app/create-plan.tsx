@@ -15,9 +15,11 @@ import {
     PRIMARY_ACTION_RADIUS,
     PRIMARY_ACTION_TEXT_SIZE,
 } from '@/src/styles/primaryAction';
+import { useKeyboardInset } from '@/src/hooks/useKeyboardInset';
 
 export default function CreatePlanScreen() {
     const { state, actions } = useCreatePlan();
+    const keyboardInset = useKeyboardInset();
     const [modals, setModals] = useState({ country: false, duration: false, homeCountry: false });
     const [showBottomFade, setShowBottomFade] = useState(false);
 
@@ -32,13 +34,14 @@ export default function CreatePlanScreen() {
     return (
         <MeshBackground>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                keyboardVerticalOffset={0}
                 className="flex-1"
             >
                 <Header title={state.isEditing ? 'EDIT TRIP PLAN' : 'CREATE NEW PLAN'} showBack />
                 <ScrollView
                     className="flex-1 px-6 py-6"
+                    contentContainerStyle={{ flexGrow: 1, paddingBottom: 160 + keyboardInset }}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                     keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}

@@ -28,3 +28,16 @@ export const setStoreState = <TState>(updater: StoreUpdater<TState>): void => {
 
     storeBridge.setState(updater as StoreUpdater<any>);
 };
+
+export const clearPersistedStoreState = async <TState>(options: {
+    preserveTheme: (state: TState) => 'light' | 'dark';
+    buildResetState: (theme: 'light' | 'dark') => Partial<TState>;
+    clearStorage: () => Promise<void>;
+}): Promise<void> => {
+    const state = getStoreState<TState>();
+    const preservedTheme = options.preserveTheme(state);
+
+    await options.clearStorage();
+
+    setStoreState<TState>(options.buildResetState(preservedTheme));
+};

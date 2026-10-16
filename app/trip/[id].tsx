@@ -1,4 +1,5 @@
 import { ActivitiesSection } from '@/components/Activities/ActivitiesSection';
+import { BottomFade } from '@/components/BottomFade';
 import { ConfirmationModal } from '@/components/ConfirmationModal';
 import { ManageMembersModal } from '@/components/ManageBuddiesModal';
 import { MeshBackground } from '@/components/MeshBackground';
@@ -24,8 +25,12 @@ import { Feather } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { NativeScrollEvent, NativeSyntheticEvent, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const FOOTER_FADE_DETECTION_RANGE = 220;
+const FOOTER_FADE_RESERVED_SPACE = 126;
+const CONTENT_FADE_HEIGHT = 170;
 
 export default function TripDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -51,14 +56,20 @@ export default function TripDetailScreen() {
     const [selectedDateIndex, setSelectedDateIndex] = useState(0);
     const [budgetDisplayHome, setBudgetDisplayHome] = useState(true);
     const [selectedBalanceIndex, setSelectedBalanceIndex] = useState(0);
+    const [footerFadeProgress, setFooterFadeProgress] = useState(0);
 
     const lastPressTime = useRef<number | null>(null);
     const listRef = useRef<ScrollView>(null);
+    const cardLayoutsRef = useRef<Record<string, { y: number; height: number }>>({});
+    const viewportHeightRef = useRef(0);
+    const scrollYRef = useRef(0);
+    const fadeProgressRef = useRef(0);
 
     const {
         trip,
         walletsStats,
         totalWalletBalanceHome,
+        totalCycleCapacityHome,
         homeCurrency,
     } = useTripWallet(id as string);
 
@@ -163,15 +174,15 @@ export default function TripDetailScreen() {
         if (!trip) return 1;
 
         if (selectedBalanceIndex === 0 || !walletsStats || walletsStats.length === 0) {
-            if (totalWalletBudgetHome <= 0) return 1;
-            return Math.max(0, Math.min(totalWalletBalanceHome / totalWalletBudgetHome, 1));
+            if (totalCycleCapacityHome <= 0) return 1;
+            return Math.max(0, Math.min(totalWalletBalanceHome / totalCycleCapacityHome, 1));
         }
 
         const wallet = walletsStats[selectedBalanceIndex - 1];
-        if (!wallet || wallet.totalExchangedTrip <= 0) return 1;
+        if (!wallet || wallet.cycleCapacityTrip <= 0) return 1;
 
-        return Math.max(0, Math.min(wallet.balance / wallet.totalExchangedTrip, 1));
-    }, [selectedBalanceIndex, totalWalletBalanceHome, totalWalletBudgetHome, trip, walletsStats]);
+        return Math.max(0, Math.min(wallet.balance / wallet.cycleCapacityTrip, 1));
+    }, [selectedBalanceIndex, totalCycleCapacityHome, totalWalletBalanceHome, trip, walletsStats]);
 
     const { canEdit: isAdmin, isCreator, currentMember } = usePermissions(trip?.id || '');
 
@@ -253,6 +264,12 @@ export default function TripDetailScreen() {
         });
     }, [activitiesByDate.length, id, tripActivities.length]);
 
+    useEffect(() => {
+        cardLayoutsRef.current = {};
+        fadeProgressRef.current = 0;
+        setFooterFadeProgress(0);
+    }, [currentGroup?.date]);
+
     const handleRequestDelete = useCallback((activity: Activity) => {
         if (!currentMember) return;
 
@@ -327,6 +344,56 @@ export default function TripDetailScreen() {
         router.replace('/(tabs)' as any);
     }, [router]);
 
+    const updateFooterFadeProgress = useCallback(() => {
+        const footerTop = scrollYRef.current + viewportHeightRef.current - FOOTER_FADE_RESERVED_SPACE;
+        const viewportBottom = scrollYRef.current + viewportHeightRef.current;
+        let strongestFade = 0;
+
+        Object.values(cardLayoutsRef.current).forEach(layout => {
+            const cardTop = layout.y;
+            const cardBottom = layout.y + layout.height;
+            const isNearViewport = cardBottom >= scrollYRef.current && cardTop <= viewportBottom;
+            if (!isNearViewport) return;
+
+            const distanceToFooter = footerTop - cardBottom;
+            const proximity = 1 - (distanceToFooter / FOOTER_FADE_DETECTION_RANGE);
+            const clamped = Math.max(0, Math.min(proximity, 1));
+            if (clamped > strongestFade) {
+                strongestFade = clamped;
+            }
+        });
+
+        const easedFade = Math.min(strongestFade * 0.9, 0.9);
+        if (Math.abs(easedFade - fadeProgressRef.current) < 0.03) {
+            return;
+        }
+
+        fadeProgressRef.current = easedFade;
+        setFooterFadeProgress(easedFade);
+    }, []);
+
+    const handleMeasureActivityCard = useCallback((activityId: string, layout: { y: number; height: number }) => {
+        cardLayoutsRef.current[activityId] = layout;
+        updateFooterFadeProgress();
+    }, [updateFooterFadeProgress]);
+
+    const handleVisibleActivitiesChange = useCallback((activityIds: string[]) => {
+        const nextLayouts: Record<string, { y: number; height: number }> = {};
+        activityIds.forEach(activityId => {
+            const existing = cardLayoutsRef.current[activityId];
+            if (existing) {
+                nextLayouts[activityId] = existing;
+            }
+        });
+        cardLayoutsRef.current = nextLayouts;
+        updateFooterFadeProgress();
+    }, [updateFooterFadeProgress]);
+
+    const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        scrollYRef.current = event.nativeEvent.contentOffset.y;
+        updateFooterFadeProgress();
+    }, [updateFooterFadeProgress]);
+
     if (!trip) {
         return (
             <MeshBackground>
@@ -352,6 +419,12 @@ export default function TripDetailScreen() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: 150 }}
                 className="flex-1"
+                onLayout={(event) => {
+                    viewportHeightRef.current = event.nativeEvent.layout.height;
+                    updateFooterFadeProgress();
+                }}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
             >
                 <TripOverviewCard
                     balanceDetail={balanceDetail}
@@ -389,6 +462,8 @@ export default function TripDetailScreen() {
                 <ActivitiesSection
                     activities={currentGroup?.activities || []}
                     tripTitle={trip.title}
+                    onMeasureItem={handleMeasureActivityCard}
+                    onVisibleActivitiesChange={handleVisibleActivitiesChange}
                     onPress={handlePressActivity}
                     onEdit={isAdmin ? handleEditActivity : undefined}
                     onDelete={isCreator ? handleDeleteActivity : undefined}
@@ -396,6 +471,13 @@ export default function TripDetailScreen() {
                     onToggleComplete={isAdmin ? toggleActivityCompletion : undefined}
                 />
             </ScrollView>
+
+            <BottomFade
+                visible={footerFadeProgress > 0.02}
+                height={CONTENT_FADE_HEIGHT}
+                bottomOffset={0}
+                opacity={footerFadeProgress}
+            />
 
             <TripDetailFooter
                 bottomInset={insets.bottom}

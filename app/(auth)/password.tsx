@@ -18,10 +18,12 @@ import { useTheme } from '@/src/hooks/useTheme';
 import { signInWithEmail } from '@/src/auth/googleAuth';
 import { bootstrapAuthState } from '@/src/auth/authRuntime';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardInset } from '@/src/hooks/useKeyboardInset';
 
 export default function PasswordScreen() {
     const { isDark, toggleTheme } = useTheme();
     const insets = useSafeAreaInsets();
+    const keyboardInset = useKeyboardInset();
     const { email } = useLocalSearchParams<{ email: string }>();
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -94,9 +96,9 @@ export default function PasswordScreen() {
 
             <KeyboardAvoidingView
                 style={styles.container}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
-                <View style={styles.content}>
+                <View style={[styles.content, { paddingBottom: keyboardInset }]}>
                     {/* Back Button */}
                     <TouchableOpacity
                         style={styles.backButton}

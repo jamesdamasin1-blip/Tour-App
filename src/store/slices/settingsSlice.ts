@@ -16,6 +16,10 @@ export interface SettingsSlice {
     deletionRequests: DeletionRequest[];
     addDeletionRequest: (req: DeletionRequest) => void;
     removeDeletionRequest: (requestId: string) => void;
+    /** Requests sent by this device, persisted so they can be re-broadcast on reconnect */
+    pendingSentDeletionRequests: DeletionRequest[];
+    addPendingSentDeletionRequest: (req: DeletionRequest) => void;
+    removePendingSentDeletionRequest: (requestId: string) => void;
     isTripsSidebarOpen: boolean;
     setTripsSidebarOpen: (isOpen: boolean) => void;
     tripMutationCounts: Record<string, number>;
@@ -60,6 +64,15 @@ export const createSettingsSlice: StateCreator<AppState, [], [], SettingsSlice> 
     deletionRequests: [],
     addDeletionRequest: (req) => set((s) => ({ deletionRequests: [...s.deletionRequests, req] })),
     removeDeletionRequest: (requestId) => set((s) => ({ deletionRequests: s.deletionRequests.filter(r => r.id !== requestId) })),
+    pendingSentDeletionRequests: [],
+    addPendingSentDeletionRequest: (req) => set((s) => ({
+        pendingSentDeletionRequests: s.pendingSentDeletionRequests.some(r => r.id === req.id)
+            ? s.pendingSentDeletionRequests
+            : [...s.pendingSentDeletionRequests, req],
+    })),
+    removePendingSentDeletionRequest: (requestId) => set((s) => ({
+        pendingSentDeletionRequests: s.pendingSentDeletionRequests.filter(r => r.id !== requestId),
+    })),
     isTripsSidebarOpen: false,
     setTripsSidebarOpen: (isOpen) => set(() => ({ isTripsSidebarOpen: isOpen })),
     tripMutationCounts: {},

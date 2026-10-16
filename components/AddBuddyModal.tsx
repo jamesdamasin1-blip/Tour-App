@@ -134,7 +134,7 @@ export const AddBuddyModal = ({ visible, onClose, initialTripId, initialStep, hi
             <GlassView
                 intensity={isDark ? 80 : 90}
                 borderRadius={36}
-                backgroundColor={isDark ? 'rgba(30, 34, 28, 0.88)' : 'rgba(255, 255, 255, 0.88)'}
+                backgroundColor={isDark ? 'rgba(30, 34, 28, 0.96)' : 'rgba(255, 255, 255, 0.97)'}
                 style={{ width: '100%', padding: 24, maxHeight: '82%' }}
             >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>

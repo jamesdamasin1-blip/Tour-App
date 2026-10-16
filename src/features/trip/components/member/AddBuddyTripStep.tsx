@@ -12,9 +12,54 @@ type AddBuddyTripStepProps = {
 export function AddBuddyTripStep({ activeTrips, isDark, onSelectTrip }: AddBuddyTripStepProps) {
     if (activeTrips.length === 0) {
         return (
-            <Text style={{ fontSize: 13, color: isDark ? '#9EB294' : '#6B7280', textAlign: 'center', paddingVertical: 20 }}>
-                No active trips
-            </Text>
+            <View
+                style={{
+                    minHeight: 140,
+                    borderRadius: 24,
+                    paddingHorizontal: 18,
+                    paddingVertical: 22,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    backgroundColor: isDark ? 'rgba(93, 109, 84, 0.14)' : 'rgba(255, 255, 255, 0.78)',
+                    borderWidth: 1,
+                    borderColor: isDark ? 'rgba(178,196,170,0.16)' : 'rgba(93,109,84,0.12)',
+                }}
+            >
+                <View
+                    style={{
+                        width: 42,
+                        height: 42,
+                        borderRadius: 14,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        marginBottom: 12,
+                        backgroundColor: isDark ? 'rgba(178,196,170,0.1)' : 'rgba(93,109,84,0.08)',
+                    }}
+                >
+                    <Feather name="briefcase" size={18} color={isDark ? '#B2C4AA' : '#5D6D54'} />
+                </View>
+                <Text
+                    style={{
+                        fontSize: 14,
+                        fontWeight: '800',
+                        color: isDark ? '#F2F0E8' : '#111827',
+                        textAlign: 'center',
+                    }}
+                >
+                    No active trips
+                </Text>
+                <Text
+                    style={{
+                        fontSize: 12,
+                        lineHeight: 18,
+                        color: isDark ? '#9EB294' : '#6B7280',
+                        textAlign: 'center',
+                        marginTop: 6,
+                    }}
+                >
+                    Create your first trip before inviting members.
+                </Text>
+            </View>
         );
     }
 
@@ -57,7 +102,7 @@ export function AddBuddyTripStep({ activeTrips, isDark, onSelectTrip }: AddBuddy
                                 {item.title}
                             </Text>
                             <Text style={{ fontSize: 11, fontWeight: '600', color: isDark ? '#9EB294' : '#6B7280', marginTop: 3 }}>
-                                {item.countries?.join(', ')}{item.members?.length ? ` · ${item.members.length} member${item.members.length !== 1 ? 's' : ''}` : ''}
+                                {item.countries?.join(', ')}{item.members?.length ? ` - ${item.members.length} member${item.members.length !== 1 ? 's' : ''}` : ''}
                             </Text>
                         </View>
                         <Feather name="chevron-right" size={16} color={isDark ? 'rgba(178,196,170,0.4)' : 'rgba(93,109,84,0.3)'} />
